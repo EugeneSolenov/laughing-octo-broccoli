@@ -1,0 +1,136 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["ops"]
+    restart: "no"
+    working_dir: /app/backend
+    env_file:
+      - ./backend/.env
+    command: sh -c "mkdir -p /app/uploads /app/.cache/whisper && chown -R appuser:appuser /app/uploads /app/.cache/whisper && exec runuser -u appuser -- alembic -c alembic.ini upgrade head"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - whisper_cache:/app/.cache/whisper
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    working_dir: /app/backend
+    env_file:
+      - ./backend/.env
+    command: sh -c "mkdir -p /app/uploads /app/.cache/whisper && chown -R appuser:appuser /app/uploads /app/.cache/whisper && exec runuser -u appuser -- uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - whisper_cache:/app/.cache/whisper
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready').read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    working_dir: /app/backend
+    env_file:
+      - ./backend/.env
+    command: sh -c "mkdir -p /app/uploads /app/.cache/whisper && chown -R appuser:appuser /app/uploads /app/.cache/whisper && exec runuser -u appuser -- celery -A app.celery_app:celery_app worker --loglevel=info --pool=solo --hostname=worker@$$HOSTNAME"
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - whisper_cache:/app/.cache/whisper
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.celery_app:celery_app inspect ping -d worker@$$HOSTNAME"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["ops"]
+    restart: unless-stopped
+    working_dir: /app/backend
+    env_file:
+      - ./backend/.env
+    command: sh -c "mkdir -p /app/uploads /app/.cache/whisper && chown -R appuser:appuser /app/uploads /app/.cache/whisper && exec runuser -u appuser -- celery -A app.celery_app:celery_app flower --address=0.0.0.0 --port=5555 --basic-auth=$${FLOWER_BASIC_AUTH:-flower:change-me-before-sharing}"
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FLOWER_PORT}:5555"
+    volumes:
+      - uploads_data:/app/uploads
+      - whisper_cache:/app/.cache/whisper
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_BACKEND_ORIGIN: ""
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_TRACES_SAMPLE_RATE: ${VITE_SENTRY_TRACES_SAMPLE_RATE:-0}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ > /dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  uploads_data:
+  whisper_cache:
