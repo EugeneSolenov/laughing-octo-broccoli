@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app import database as database_module
 from app.auth import hash_password
 from app.config import settings

@@ -44,10 +44,7 @@ def _build_audio_enhancement_filter() -> str | None:
         filters.append("afftdn=nf=-25")
     if settings.audio_loudnorm_enabled:
         filters.append(
-            "loudnorm="
-            f"I={settings.audio_loudnorm_i}:"
-            f"TP={settings.audio_loudnorm_tp}:"
-            f"LRA={settings.audio_loudnorm_lra}"
+            f"loudnorm=I={settings.audio_loudnorm_i}:TP={settings.audio_loudnorm_tp}:LRA={settings.audio_loudnorm_lra}"
         )
     return ",".join(filters) or None
 
@@ -89,9 +86,7 @@ def _run_normalize_audio_command(command: list[str]) -> subprocess.CompletedProc
 def normalize_audio_for_whisper(source_path: Path) -> Path:
     normalized_path = source_path.with_suffix(".whisper.wav")
     audio_filter = _build_audio_enhancement_filter()
-    completed = _run_normalize_audio_command(
-        _normalize_audio_command(source_path, normalized_path, audio_filter)
-    )
+    completed = _run_normalize_audio_command(_normalize_audio_command(source_path, normalized_path, audio_filter))
     if completed.returncode != 0 and audio_filter:
         logger.warning(
             "ffmpeg audio enhancement failed, retrying without filters",
@@ -135,6 +130,8 @@ def trim_audio_clip(source_path: Path, *, start_seconds: float | None, end_secon
 
 def _coerce_duration(value: object) -> float | None:
     if value in (None, "", "N/A"):
+        return None
+    if not isinstance(value, (str, int, float)):
         return None
 
     try:

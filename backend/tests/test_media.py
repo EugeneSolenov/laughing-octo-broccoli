@@ -4,16 +4,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from app import media
 from app.media import MediaProcessingError
 
 
-def _completed_process(args: list[str], *, returncode: int = 0, stdout: str = "", stderr: str = "") -> subprocess.CompletedProcess[str]:
+def _completed_process(
+    args: list[str], *, returncode: int = 0, stdout: str = "", stderr: str = ""
+) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=args, returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def test_normalize_audio_for_whisper_applies_enhancement_filters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_normalize_audio_for_whisper_applies_enhancement_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_path = tmp_path / "clip.webm"
     source_path.write_bytes(b"fake")
     seen_args: list[str] = []
@@ -72,7 +75,9 @@ def test_normalize_audio_for_whisper_retries_without_filters_when_enhancement_fa
     assert "-af" not in calls[1]
 
 
-def test_normalize_audio_for_whisper_can_skip_enhancement_filters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_normalize_audio_for_whisper_can_skip_enhancement_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_path = tmp_path / "clip.webm"
     source_path.write_bytes(b"fake")
     seen_args: list[str] = []
@@ -90,7 +95,9 @@ def test_normalize_audio_for_whisper_can_skip_enhancement_filters(tmp_path: Path
     assert "-af" not in seen_args
 
 
-def test_probe_audio_duration_uses_stream_duration_when_format_duration_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_audio_duration_uses_stream_duration_when_format_duration_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_path = tmp_path / "clip.webm"
     source_path.write_bytes(b"fake")
 
@@ -108,7 +115,9 @@ def test_probe_audio_duration_uses_stream_duration_when_format_duration_is_missi
     assert media.probe_audio_duration(source_path) == 15.04
 
 
-def test_probe_audio_duration_falls_back_to_decoded_wav_when_ffprobe_returns_na(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_audio_duration_falls_back_to_decoded_wav_when_ffprobe_returns_na(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_path = tmp_path / "clip.webm"
     source_path.write_bytes(b"fake")
 
@@ -142,7 +151,9 @@ def test_probe_audio_duration_falls_back_to_decoded_wav_when_ffprobe_returns_na(
     assert media.probe_audio_duration(source_path) == 12.5
 
 
-def test_probe_audio_duration_raises_when_duration_cannot_be_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_audio_duration_raises_when_duration_cannot_be_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_path = tmp_path / "clip.webm"
     source_path.write_bytes(b"fake")
 
@@ -170,7 +181,9 @@ def test_probe_audio_duration_raises_when_duration_cannot_be_resolved(tmp_path: 
         media.probe_audio_duration(source_path)
 
 
-def test_probe_audio_duration_falls_back_to_ffmpeg_duration_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_audio_duration_falls_back_to_ffmpeg_duration_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_path = tmp_path / "clip.webm"
     source_path.write_bytes(b"fake")
 

@@ -7,9 +7,8 @@ Create Date: 2026-04-04 00:00:00
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "20260404_0001"
 down_revision = None
@@ -49,7 +48,9 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("audio_url", sa.String(length=512), nullable=False),
         sa.Column("transcription_text", sa.Text(), nullable=True),
-        sa.Column("status", sa.Enum("processing", "completed", "error", name="tweetstatus", native_enum=False), nullable=False),
+        sa.Column(
+            "status", sa.Enum("processing", "completed", "error", name="tweetstatus", native_enum=False), nullable=False
+        ),
         sa.Column("mime_type", sa.String(length=100), nullable=False),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),

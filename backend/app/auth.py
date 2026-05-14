@@ -7,8 +7,8 @@ from uuid import uuid4
 
 from fastapi import Cookie, Depends, HTTPException, Request, Response, status
 from jose import JWTError, jwt
-from pydantic import BaseModel
 from pwdlib import PasswordHash
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -90,24 +90,25 @@ def issue_action_token(user: User, *, token_type: str, expires_delta: timedelta)
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
-    common_kwargs = {
-        "httponly": True,
-        "secure": settings.cookie_secure,
-        "samesite": settings.cookie_samesite,
-        "domain": settings.cookie_domain,
-        "path": "/",
-    }
     response.set_cookie(
         key=settings.access_cookie_name,
         value=access_token,
         max_age=settings.access_token_expire_minutes * 60,
-        **common_kwargs,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        domain=settings.cookie_domain,
+        path="/",
     )
     response.set_cookie(
         key=settings.refresh_cookie_name,
         value=refresh_token,
         max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
-        **common_kwargs,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        domain=settings.cookie_domain,
+        path="/",
     )
     set_csrf_cookie(response)
 
@@ -120,7 +121,9 @@ def clear_auth_cookies(response: Response) -> None:
 
 def create_auth_session(db: Session, *, user: User, request: Request) -> AuthSession:
     forwarded_for = request.headers.get("x-forwarded-for", "")
-    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else None)
+    client_ip = (
+        forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else None)
+    )
     session = AuthSession(
         id=str(uuid4()),
         user_id=user.id,

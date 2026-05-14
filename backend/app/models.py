@@ -253,7 +253,9 @@ class Notification(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    tweet_id: Mapped[int | None] = mapped_column(ForeignKey("voice_tweets.id", ondelete="CASCADE"), nullable=True, index=True)
+    tweet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice_tweets.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     type: Mapped[NotificationType] = mapped_column(
         Enum(NotificationType, native_enum=False),
         nullable=False,
@@ -297,8 +299,12 @@ class Report(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    tweet_id: Mapped[int | None] = mapped_column(ForeignKey("voice_tweets.id", ondelete="CASCADE"), nullable=True, index=True)
+    target_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    tweet_id: Mapped[int | None] = mapped_column(
+        ForeignKey("voice_tweets.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     reason: Mapped[str] = mapped_column(String(100), nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ReportStatus] = mapped_column(

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 
-import logging
-from sqlalchemy import create_engine
-from sqlalchemy import inspect, select
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
 

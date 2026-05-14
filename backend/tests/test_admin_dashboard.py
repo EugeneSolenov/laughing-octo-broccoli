@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from app.models import Report, ReportStatus, TweetStatus, User, UserRole, VoiceTweet
+from fastapi.testclient import TestClient
 
 
 def test_admin_can_resolve_report_without_dashboard_error(client: TestClient, db_session, csrf_token: str) -> None:

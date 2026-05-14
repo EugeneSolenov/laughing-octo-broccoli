@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi.testclient import TestClient
-
 from app import main as main_module
 from app.models import AuthSession
+from fastapi.testclient import TestClient
 
 
 def test_register_requires_csrf_header(client: TestClient, csrf_token: str) -> None:
@@ -122,7 +121,9 @@ def test_change_password_revokes_existing_sessions_immediately(client: TestClien
         assert second_client.get("/api/auth/session").status_code == 401
 
 
-def test_session_restores_from_refresh_cookie_when_access_cookie_is_missing(client: TestClient, csrf_token: str) -> None:
+def test_session_restores_from_refresh_cookie_when_access_cookie_is_missing(
+    client: TestClient, csrf_token: str
+) -> None:
     register_response = client.post(
         "/api/auth/register",
         headers={"X-CSRF-Token": csrf_token},

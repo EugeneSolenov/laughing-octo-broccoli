@@ -7,9 +7,8 @@ Create Date: 2026-04-04 21:10:00
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = "20260404_0003"
 down_revision = "20260404_0002"
@@ -47,7 +46,9 @@ REPORT_STATUS = sa.Enum(
 def upgrade() -> None:
     op.add_column("users", sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("users", sa.Column("notifications_enabled", sa.Boolean(), nullable=False, server_default=sa.true()))
-    op.add_column("users", sa.Column("email_notifications_enabled", sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column(
+        "users", sa.Column("email_notifications_enabled", sa.Boolean(), nullable=False, server_default=sa.false())
+    )
     op.add_column("users", sa.Column("discoverable", sa.Boolean(), nullable=False, server_default=sa.true()))
     op.create_index("ix_users_created_at", "users", ["created_at"], unique=False)
 
@@ -65,7 +66,9 @@ def upgrade() -> None:
     op.create_index("ix_voice_tweets_parent_tweet_id", "voice_tweets", ["parent_tweet_id"], unique=False)
     op.execute(
         "CREATE INDEX ix_voice_tweets_search_document "
-        "ON voice_tweets USING gin (to_tsvector('simple', coalesce(caption, '') || ' ' || coalesce(transcription_text, '')))"
+        "ON voice_tweets USING gin ("
+        "to_tsvector('simple', coalesce(caption, '') || ' ' || coalesce(transcription_text, ''))"
+        ")"
     )
 
     op.alter_column(

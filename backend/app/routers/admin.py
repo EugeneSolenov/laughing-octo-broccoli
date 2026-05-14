@@ -39,9 +39,9 @@ def _build_admin_dashboard(
 ) -> AdminDashboardResponse:
     total_users = db.scalar(select(func.count()).select_from(User)) or 0
     total_tweets = db.scalar(select(func.count()).select_from(VoiceTweet)) or 0
-    processing_tweets = db.scalar(
-        select(func.count()).select_from(VoiceTweet).where(VoiceTweet.status == TweetStatus.processing)
-    ) or 0
+    processing_tweets = (
+        db.scalar(select(func.count()).select_from(VoiceTweet).where(VoiceTweet.status == TweetStatus.processing)) or 0
+    )
     banned_users = db.scalar(select(func.count()).select_from(User).where(User.is_banned.is_(True))) or 0
     open_reports = db.scalar(select(func.count()).select_from(Report).where(Report.status == ReportStatus.open)) or 0
 

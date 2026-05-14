@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from threading import Lock
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 import redis
 from celery import Celery
@@ -83,7 +84,7 @@ def queue_transcription(tweet_id: int) -> None:
 def get_queue_depth() -> int:
     try:
         redis_client = redis.Redis.from_url(settings.redis_url)
-        return int(redis_client.llen(settings.celery_queue_name))
+        return cast(int, redis_client.llen(settings.celery_queue_name))
     except Exception:
         logger.exception("Failed to inspect queue depth")
         return 0
@@ -214,9 +215,7 @@ def _sanitize_transcript_token(token: str) -> str | None:
 def _sanitize_transcript_text(text: str) -> str:
     without_annotations = _NON_SPEECH_ANNOTATION_RE.sub(" ", text)
     cleaned_tokens = [
-        cleaned_token
-        for token in without_annotations.split()
-        if (cleaned_token := _sanitize_transcript_token(token))
+        cleaned_token for token in without_annotations.split() if (cleaned_token := _sanitize_transcript_token(token))
     ]
     cleaned_text = " ".join(cleaned_tokens)
     cleaned_text = re.sub(r"\s+([.,!?;:\u2026])", r"\1", cleaned_text)
@@ -367,6 +366,8 @@ def transcribe_voice_tweet(self, tweet_id: int) -> None:
         tweet = db.get(VoiceTweet, tweet_id)
         if tweet is None or tweet.status == TweetStatus.completed:
             return
+        if not tweet.audio_url:
+            raise LocalTranscriptionError("Tweet has no audio file to transcribe.")
 
         with storage.processing_path(tweet.audio_url) as source_path:
             if not source_path.exists():
@@ -389,7 +390,9 @@ def transcribe_voice_tweet(self, tweet_id: int) -> None:
             )
         db.commit()
         logger.info("Transcription completed", extra={"tweet_id": tweet_id})
-        publish_public_event("tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id)
+        publish_public_event(
+            "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id
+        )
         publish_user_event(tweet.user_id, "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value)
         if notification:
             publish_user_event(
@@ -420,8 +423,12 @@ def transcribe_voice_tweet(self, tweet_id: int) -> None:
             db.add(tweet)
             db.commit()
             logger.exception("Transcription failed permanently", extra={"tweet_id": tweet_id})
-            publish_public_event("tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id)
-            publish_user_event(tweet.user_id, "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value)
+            publish_public_event(
+                "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id
+            )
+            publish_user_event(
+                tweet.user_id, "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value
+            )
         raise
     finally:
         if normalized_path and normalized_path.exists():

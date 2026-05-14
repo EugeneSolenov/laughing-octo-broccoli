@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-from sqlalchemy import insert, select
-
 from app.auth import hash_password
 from app.models import Notification, TweetStatus, User, UserRole, VoiceTweet, follows, tweet_likes, tweet_reposts
+from fastapi.testclient import TestClient
+from sqlalchemy import insert, select
 
 
 def create_user(*, email: str, username: str) -> User:
@@ -26,7 +25,9 @@ def login(client: TestClient, email: str, csrf_token: str) -> None:
     assert response.status_code == 200
 
 
-def test_feed_returns_root_posts_in_reverse_chronological_order(client: TestClient, db_session, csrf_token: str) -> None:
+def test_feed_returns_root_posts_in_reverse_chronological_order(
+    client: TestClient, db_session, csrf_token: str
+) -> None:
     author = create_user(email="author@example.com", username="author")
     db_session.add(author)
     db_session.flush()
@@ -257,7 +258,9 @@ def test_like_and_dislike_are_mutually_exclusive(client: TestClient, db_session,
     assert like_payload["likes_count"] == 1
     assert like_payload["dislikes_count"] == 0
 
-    dislike_again_response = client.post(f"/api/tweets/{tweet.id}/dislike", headers={"X-CSRF-Token": session_csrf_token})
+    dislike_again_response = client.post(
+        f"/api/tweets/{tweet.id}/dislike", headers={"X-CSRF-Token": session_csrf_token}
+    )
     assert dislike_again_response.status_code == 200
     dislike_again_payload = dislike_again_response.json()
     assert dislike_again_payload["liked_by_viewer"] is False

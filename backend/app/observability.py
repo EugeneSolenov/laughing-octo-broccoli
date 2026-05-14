@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.config import settings
 
@@ -22,7 +23,7 @@ def configure_observability(*, worker: bool = False) -> None:
         logger.exception("Sentry SDK is not available")
         return
 
-    integrations = [
+    integrations: list[Any] = [
         LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
     ]
     if worker:

@@ -23,8 +23,8 @@ from app.auth import (
     touch_auth_session,
     verify_password,
 )
-from app.csrf import ensure_csrf_cookie
 from app.config import settings
+from app.csrf import ensure_csrf_cookie
 from app.database import get_db
 from app.models import AuthSession, User, UserRole
 from app.rate_limit import limiter
@@ -57,7 +57,9 @@ def get_csrf_token(request: Request, response: Response) -> CsrfTokenResponse:
 
 @router.post("/auth/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 @limiter.limit(settings.auth_register_rate_limit)
-def register(request: Request, payload: RegisterRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+def register(
+    request: Request, payload: RegisterRequest, response: Response, db: Session = Depends(get_db)
+) -> AuthResponse:
     existing_user = db.scalar(
         select(User).where(or_(User.email == payload.email.lower(), User.username == payload.username.strip()))
     )
@@ -172,7 +174,9 @@ def revoke_session(
 
 
 @router.post("/auth/logout-all", response_model=GenericDetailResponse)
-def logout_all(response: Response, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> GenericDetailResponse:
+def logout_all(
+    response: Response, current_user: AuthenticatedUser, db: Session = Depends(get_db)
+) -> GenericDetailResponse:
     revoke_all_auth_sessions(db, user_id=current_user.id)
     db.commit()
     clear_auth_cookies(response)

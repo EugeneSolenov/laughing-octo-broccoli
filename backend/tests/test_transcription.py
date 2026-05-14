@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from app import transcription
 
 
@@ -20,7 +19,9 @@ class DummyModel:
         language = kwargs["language"]
         self.calls.append((file_path, language, kwargs))
         response = self.responses[language]
-        return iter(response["segments"]), SimpleNamespace(language=language, language_probability=response.get("language_probability", 1.0))
+        return iter(response["segments"]), SimpleNamespace(
+            language=language, language_probability=response.get("language_probability", 1.0)
+        )
 
 
 def make_segment(text, no_speech_prob):
@@ -80,8 +81,7 @@ def test_sanitize_transcript_removes_asr_word_artifacts_without_touching_user_to
     )
 
     assert (
-        transcript
-        == "\u042d\u0442\u043e \u043e\u043e\u0447\u0435\u043d\u044c "
+        transcript == "\u042d\u0442\u043e \u043e\u043e\u0447\u0435\u043d\u044c "
         "\u0432\u0430\u0436\u043d\u044b\u0439 \u0442\u0435\u0441\u0442 "
         "#\u0432\u0430\u0436\u043d\u043e @speaker https://example.com"
     )
@@ -195,8 +195,15 @@ def test_transcribe_audio_passes_quality_parameters(monkeypatch):
     monkeypatch.setattr(transcription.settings, "whisper_temperature_fallback", "0.0,0.2,0.4,0.6", raising=False)
     monkeypatch.setattr(transcription.settings, "whisper_vad_filter", True, raising=False)
     monkeypatch.setattr(transcription.settings, "whisper_vad_min_silence_duration_ms", 1000, raising=False)
-    monkeypatch.setattr(transcription.settings, "whisper_initial_prompt", "\u0440\u0443\u0441\u0441\u043a\u0438\u0439 \u0442\u0435\u043a\u0441\u0442", raising=False)
-    monkeypatch.setattr(transcription.settings, "whisper_hotwords", "\u043a\u0430\u0442\u0441\u0446\u0435\u043d\u0430", raising=False)
+    monkeypatch.setattr(
+        transcription.settings,
+        "whisper_initial_prompt",
+        "\u0440\u0443\u0441\u0441\u043a\u0438\u0439 \u0442\u0435\u043a\u0441\u0442",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        transcription.settings, "whisper_hotwords", "\u043a\u0430\u0442\u0441\u0446\u0435\u043d\u0430", raising=False
+    )
 
     transcript = transcription.transcribe_audio("sample.wav")
 

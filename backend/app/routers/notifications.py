@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import update, select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth import AuthenticatedUser

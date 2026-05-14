@@ -7,7 +7,16 @@ from typing import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Notification, NotificationType, follows, tweet_likes, tweet_reposts, user_blocks, user_mutes, VoiceTweet
+from app.models import (
+    Notification,
+    NotificationType,
+    VoiceTweet,
+    follows,
+    tweet_likes,
+    tweet_reposts,
+    user_blocks,
+    user_mutes,
+)
 
 
 @dataclass(slots=True)
@@ -30,27 +39,31 @@ def build_tweet_render_context(
     if not tweet_ids:
         return TweetRenderContext()
 
-    like_counts = dict(
-        db.execute(
+    like_counts: dict[int, int] = {
+        int(tweet_id): int(count)
+        for tweet_id, count in db.execute(
             select(tweet_likes.c.tweet_id, func.count())
             .where(tweet_likes.c.tweet_id.in_(tweet_ids))
             .group_by(tweet_likes.c.tweet_id)
         ).all()
-    )
-    repost_counts = dict(
-        db.execute(
+    }
+    repost_counts: dict[int, int] = {
+        int(tweet_id): int(count)
+        for tweet_id, count in db.execute(
             select(tweet_reposts.c.tweet_id, func.count())
             .where(tweet_reposts.c.tweet_id.in_(tweet_ids))
             .group_by(tweet_reposts.c.tweet_id)
         ).all()
-    )
-    reply_counts = dict(
-        db.execute(
+    }
+    reply_counts: dict[int, int] = {
+        int(tweet_id): int(count)
+        for tweet_id, count in db.execute(
             select(VoiceTweet.parent_tweet_id, func.count())
             .where(VoiceTweet.parent_tweet_id.in_(tweet_ids))
             .group_by(VoiceTweet.parent_tweet_id)
         ).all()
-    )
+        if tweet_id is not None
+    }
 
     context = TweetRenderContext(
         like_counts=like_counts,

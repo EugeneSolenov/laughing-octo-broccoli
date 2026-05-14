@@ -146,7 +146,9 @@ def _apply_feed_search(db: Session, statement, search_query: str | None):
         return statement
 
     normalized_query = search_query.strip()
-    transcription_document = func.coalesce(VoiceTweet.caption, "") + " " + func.coalesce(VoiceTweet.transcription_text, "")
+    transcription_document = (
+        func.coalesce(VoiceTweet.caption, "") + " " + func.coalesce(VoiceTweet.transcription_text, "")
+    )
     if db.bind and db.bind.dialect.name == "postgresql":
         tsquery = func.websearch_to_tsquery("simple", normalized_query)
         return statement.where(
@@ -216,7 +218,9 @@ def _create_tweet_and_enqueue(
         parent_tweet = _load_tweet_or_404(db, parent_tweet_id)
         _assert_viewer_can_access_tweet(db, tweet=parent_tweet, viewer=current_user)
         if parent_tweet.parent_tweet_id is not None:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Replies to comments are disabled.")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Replies to comments are disabled."
+            )
 
     if audio is not None:
         try:
@@ -229,7 +233,9 @@ def _create_tweet_and_enqueue(
         except MediaProcessingError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     elif parent_tweet_id is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Audio is required for a new post.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Audio is required for a new post."
+        )
     elif not normalized_caption:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Comment text is required.")
 
@@ -303,7 +309,9 @@ def get_feed(
     db: Session = Depends(get_db),
 ) -> FeedResponse:
     if (cursor_created_at is None) ^ (cursor_id is None):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Cursor must include both created_at and id.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Cursor must include both created_at and id."
+        )
 
     statement = (
         select(VoiceTweet)
@@ -340,7 +348,7 @@ def get_feed(
         )
 
     statement = _apply_feed_search(db, statement, q)
-    tweets = db.scalars(statement.limit(limit + 1)).all()
+    tweets = list(db.scalars(statement.limit(limit + 1)).all())
     next_cursor = None
 
     if len(tweets) > limit:
@@ -369,7 +377,7 @@ def get_tweet_detail(tweet_id: int, viewer: OptionalUser = None, db: Session = D
         if excluded_ids:
             replies_statement = replies_statement.where(VoiceTweet.user_id.not_in(excluded_ids))
 
-    replies = db.scalars(replies_statement).all()
+    replies = list(db.scalars(replies_statement).all())
     all_tweets = [tweet, *replies]
     if tweet.parent is not None:
         all_tweets.append(tweet.parent)
@@ -387,7 +395,9 @@ def get_tweet_detail(tweet_id: int, viewer: OptionalUser = None, db: Session = D
 
 
 @router.post("/tweets/create", response_model=VoiceTweetRead, status_code=status.HTTP_202_ACCEPTED)
-@router.post("/tweets/upload", response_model=VoiceTweetRead, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
+@router.post(
+    "/tweets/upload", response_model=VoiceTweetRead, status_code=status.HTTP_202_ACCEPTED, include_in_schema=False
+)
 @limiter.limit(settings.tweet_create_rate_limit)
 def create_tweet(
     request: Request,
@@ -410,7 +420,9 @@ def create_tweet(
         trim_end_seconds=trim_end_seconds,
     )
     created_tweet = _load_tweet_or_404(db, tweet.id)
-    return serialize_tweet(created_tweet, context=_tweet_context_for_single(db, tweet=created_tweet, viewer=current_user))
+    return serialize_tweet(
+        created_tweet, context=_tweet_context_for_single(db, tweet=created_tweet, viewer=current_user)
+    )
 
 
 @router.post("/tweets/{tweet_id}/reply", response_model=VoiceTweetRead, status_code=status.HTTP_202_ACCEPTED)
@@ -436,7 +448,9 @@ def reply_to_tweet(
         trim_end_seconds=trim_end_seconds,
     )
     created_reply = _load_tweet_or_404(db, reply.id)
-    return serialize_tweet(created_reply, context=_tweet_context_for_single(db, tweet=created_reply, viewer=current_user))
+    return serialize_tweet(
+        created_reply, context=_tweet_context_for_single(db, tweet=created_reply, viewer=current_user)
+    )
 
 
 @router.patch("/tweets/{tweet_id}", response_model=VoiceTweetRead)
@@ -455,19 +469,27 @@ def update_tweet(
     if payload.caption is not None:
         tweet.caption = payload.caption.strip() if payload.caption and payload.caption.strip() else None
     if payload.transcription_text is not None:
-        tweet.transcription_text = payload.transcription_text.strip() if payload.transcription_text and payload.transcription_text.strip() else None
+        tweet.transcription_text = (
+            payload.transcription_text.strip()
+            if payload.transcription_text and payload.transcription_text.strip()
+            else None
+        )
         tweet.edited_transcription_at = datetime.now(UTC)
         tweet.status = TweetStatus.completed
         tweet.error_message = None
     db.add(tweet)
     db.commit()
     db.refresh(tweet)
-    publish_public_event("tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id)
+    publish_public_event(
+        "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id
+    )
     return serialize_tweet(tweet, context=_tweet_context_for_single(db, tweet=tweet, viewer=current_user))
 
 
 @router.post("/tweets/{tweet_id}/rerun-transcription", response_model=VoiceTweetRead)
-def rerun_transcription(tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> VoiceTweetRead:
+def rerun_transcription(
+    tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)
+) -> VoiceTweetRead:
     tweet = _load_tweet_or_404(db, tweet_id)
     is_owner = tweet.user_id == current_user.id
     is_admin = current_user.role == UserRole.admin
@@ -481,7 +503,9 @@ def rerun_transcription(tweet_id: int, current_user: AuthenticatedUser, db: Sess
     db.add(tweet)
     db.commit()
     queue_transcription(tweet.id)
-    publish_public_event("tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id)
+    publish_public_event(
+        "tweet.transcription_updated", tweet_id=tweet.id, status=tweet.status.value, user_id=tweet.user_id
+    )
     return serialize_tweet(tweet, context=_tweet_context_for_single(db, tweet=tweet, viewer=current_user))
 
 
@@ -505,7 +529,8 @@ def delete_tweet(
     db.delete(tweet)
     db.commit()
 
-    storage.delete(audio_reference)
+    if audio_reference:
+        storage.delete(audio_reference)
     publish_public_event("tweet.deleted", tweet_id=tweet_id, user_id=current_user.id)
 
 

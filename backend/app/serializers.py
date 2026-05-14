@@ -6,11 +6,11 @@ from app.schemas import (
     FeedCursor,
     FeedResponse,
     NotificationRead,
-    PublicProfileResponse,
     ProfileResponse,
+    PublicProfileResponse,
     ReportRead,
-    UserPublic,
     UserProfileRead,
+    UserPublic,
     UserRead,
     VoiceTweetRead,
 )
@@ -71,7 +71,7 @@ def serialize_tweet(tweet: VoiceTweet, *, context: TweetRenderContext | None = N
 
     return VoiceTweetRead(
         id=tweet.id,
-        audio_url=storage.resolve_public_url(tweet.audio_url),
+        audio_url=storage.resolve_public_url(tweet.audio_url or ""),
         duration_seconds=tweet.duration_seconds,
         caption=tweet.caption,
         transcription_text=tweet.transcription_text,
@@ -177,7 +177,9 @@ def _notification_preview(notification: Notification) -> str | None:
     if notification.tweet is None:
         return None
 
-    preview_source = notification.tweet.caption or notification.tweet.transcription_text or notification.tweet.error_message
+    preview_source = (
+        notification.tweet.caption or notification.tweet.transcription_text or notification.tweet.error_message
+    )
     if not preview_source:
         return None
     return _truncate_notification_preview(preview_source)

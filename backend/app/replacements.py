@@ -62,5 +62,9 @@ def apply_transcript_replacements(text: str, *, raw_replacements: str | None = N
     corrected_text = text
     for source, target in _parse_replacements(replacements_source):
         pattern = _replacement_pattern(source)
-        corrected_text = pattern.sub(lambda match: _apply_replacement_case(match.group(0), target), corrected_text)
+
+        def replace(match: re.Match[str], replacement: str = target) -> str:
+            return _apply_replacement_case(match.group(0), replacement)
+
+        corrected_text = pattern.sub(replace, corrected_text)
     return corrected_text

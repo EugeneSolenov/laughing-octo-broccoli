@@ -144,18 +144,18 @@ def _call_openai_compatible_llm(text: str, *, language: str | None = None) -> st
     try:
         with request.urlopen(http_request, timeout=settings.transcription_postprocess_llm_timeout_seconds) as response:
             response_payload = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError):
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         logger.exception("Transcript LLM postprocess request failed")
         if _llm_required():
-            raise TranscriptPostprocessError("Transcript LLM postprocess request failed")
+            raise TranscriptPostprocessError("Transcript LLM postprocess request failed") from exc
         return None
 
     try:
         content = response_payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
+    except (KeyError, IndexError, TypeError) as exc:
         message = "Transcript LLM postprocess returned an unexpected response"
         if _llm_required():
-            raise TranscriptPostprocessError(message)
+            raise TranscriptPostprocessError(message) from exc
         logger.warning(message)
         return None
 

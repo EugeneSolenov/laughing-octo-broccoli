@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import logging
+from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from typing import cast
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
 import redis
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi import _rate_limit_exceeded_handler
+from sqlalchemy import text
+from starlette.requests import Request
+from starlette.responses import Response as StarletteResponse
 
 from app.config import settings
 from app.csrf import csrf_middleware
@@ -45,7 +49,11 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+rate_limit_handler = cast(
+    Callable[[Request, Exception], StarletteResponse | Awaitable[StarletteResponse]],
+    _rate_limit_exceeded_handler,
+)
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_middleware(SlowAPIMiddleware)
 app.middleware("http")(csrf_middleware)
 

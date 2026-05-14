@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import model_validator, field_validator
-from pydantic import AnyHttpUrl, Field
+from pydantic import AnyHttpUrl, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_DIR = Path(__file__).resolve().parent
@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://voice:voice@localhost:5432/voice_twitter"
     redis_url: str = "redis://localhost:6379/0"
 
-    backend_origin: AnyHttpUrl = "http://localhost:8000"
-    frontend_origin: AnyHttpUrl = "http://localhost:5173"
+    backend_origin: AnyHttpUrl = AnyHttpUrl("http://localhost:8000")
+    frontend_origin: AnyHttpUrl = AnyHttpUrl("http://localhost:5173")
 
     secret_key: str = Field(default="change-me-in-production-please-1234", min_length=32)
     jwt_algorithm: str = "HS256"
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     csrf_header_name: str = "X-CSRF-Token"
     cookie_secure: bool = True
     cookie_domain: str | None = None
-    cookie_samesite: str = "lax"
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     uploads_dir: str = str(REPO_DIR / "uploads")
     static_upload_prefix: str = "/uploads"

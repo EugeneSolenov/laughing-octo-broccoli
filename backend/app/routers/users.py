@@ -15,9 +15,9 @@ from app.models import NotificationType, Report, User, VoiceTweet, follows, user
 from app.schemas import (
     BanUserRequest,
     FollowResponse,
-    PublicProfileResponse,
     ProfileResponse,
     ProfileUpdateRequest,
+    PublicProfileResponse,
     ReportCreateRequest,
     SettingsPreferencesRead,
     SettingsPreferencesUpdateRequest,
@@ -25,7 +25,13 @@ from app.schemas import (
     UserRelationResponse,
     UserSearchResponse,
 )
-from app.serializers import serialize_profile, serialize_public_profile, serialize_user, serialize_user_public, serialize_tweet
+from app.serializers import (
+    serialize_profile,
+    serialize_public_profile,
+    serialize_tweet,
+    serialize_user,
+    serialize_user_public,
+)
 from app.social import build_tweet_render_context, create_notification, get_blocked_user_ids, get_muted_user_ids
 from app.storage import storage
 
@@ -74,7 +80,7 @@ def _load_profile_tweets(
     limit: int,
     offset: int,
 ) -> list[VoiceTweet]:
-    return db.scalars(_profile_tweet_statement(user_id, q).limit(limit).offset(offset)).all()
+    return list(db.scalars(_profile_tweet_statement(user_id, q).limit(limit).offset(offset)).all())
 
 
 def _serialize_profile_tweets(db: Session, *, tweets: list[VoiceTweet], viewer_id: int | None):
@@ -97,7 +103,9 @@ def _following_state(db: Session, *, viewer_id: int, target_ids: set[int] | None
 def _profile_counts(db: Session, *, user_id: int) -> tuple[int, int, int, int]:
     follower_count = db.scalar(select(func.count()).select_from(follows).where(follows.c.followed_id == user_id)) or 0
     following_count = db.scalar(select(func.count()).select_from(follows).where(follows.c.follower_id == user_id)) or 0
-    blocked_count = db.scalar(select(func.count()).select_from(user_blocks).where(user_blocks.c.blocker_id == user_id)) or 0
+    blocked_count = (
+        db.scalar(select(func.count()).select_from(user_blocks).where(user_blocks.c.blocker_id == user_id)) or 0
+    )
     muted_count = db.scalar(select(func.count()).select_from(user_mutes).where(user_mutes.c.muter_id == user_id)) or 0
     return follower_count, following_count, blocked_count, muted_count
 
@@ -167,7 +175,10 @@ def _persist_avatar_upload(file: UploadFile, user_id: int) -> str:
             while chunk := file.file.read(1024 * 1024):
                 bytes_written += len(chunk)
                 if bytes_written > MAX_AVATAR_BYTES:
-                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Avatar uploads are limited to 5 MB.")
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Avatar uploads are limited to 5 MB.",
+                    )
                 buffer.write(chunk)
         return storage.save_file(
             temp_path,
@@ -190,7 +201,9 @@ def _assert_no_block_relationship(db: Session, *, viewer_id: int, target_id: int
         )
     ).first()
     if existing:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This action is unavailable for blocked users.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="This action is unavailable for blocked users."
+        )
 
 
 @router.get("/profile", response_model=ProfileResponse)
@@ -311,7 +324,9 @@ def search_users(
     users = db.scalars(statement).all()
     if viewer and users:
         following_ids = _following_state(db, viewer_id=viewer.id, target_ids={user.id for user in users})
-    return UserSearchResponse(items=[serialize_user_public(user, is_following=user.id in following_ids) for user in users])
+    return UserSearchResponse(
+        items=[serialize_user_public(user, is_following=user.id in following_ids) for user in users]
+    )
 
 
 @router.get("/users/suggestions", response_model=UserSearchResponse)
@@ -347,7 +362,9 @@ def suggest_users(
             statement = statement.where(User.id.not_in(excluded_ids))
 
     users = db.scalars(statement).all()
-    return UserSearchResponse(items=[serialize_user_public(user, is_following=user.id in followed_ids) for user in users])
+    return UserSearchResponse(
+        items=[serialize_user_public(user, is_following=user.id in followed_ids) for user in users]
+    )
 
 
 @router.get("/users/{user_id}", response_model=PublicProfileResponse)
@@ -507,13 +524,19 @@ def unmute_user(user_id: int, current_user: AuthenticatedUser, db: Session = Dep
 
 
 @router.post("/reports", response_model=UserRelationResponse, status_code=status.HTTP_201_CREATED)
-def create_report(payload: ReportCreateRequest, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> UserRelationResponse:
+def create_report(
+    payload: ReportCreateRequest, current_user: AuthenticatedUser, db: Session = Depends(get_db)
+) -> UserRelationResponse:
     if payload.tweet_id is None and payload.target_user_id is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A report must target a user or a post.")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A report must target a user or a post."
+        )
 
     target_user_id = payload.target_user_id
     if payload.tweet_id is not None:
-        tweet = db.scalar(select(VoiceTweet).options(selectinload(VoiceTweet.user)).where(VoiceTweet.id == payload.tweet_id))
+        tweet = db.scalar(
+            select(VoiceTweet).options(selectinload(VoiceTweet.user)).where(VoiceTweet.id == payload.tweet_id)
+        )
         if tweet is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tweet not found.")
         target_user_id = target_user_id or tweet.user_id
