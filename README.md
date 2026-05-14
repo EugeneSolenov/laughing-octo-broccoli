@@ -511,15 +511,3 @@ TRANSCRIPTION_POSTPROCESS_LLM_BASE_URL=https://api.openai.com/v1
 
 </details>
 
-## Материалы отчёта
-
-| Файл или папка | Назначение |
-| --- | --- |
-| `report/Перв.docx` | Основной редактируемый документ |
-| `report/plantuml/*.puml` | Исходники PlantUML-диаграмм |
-| `report/diagrams.html` | HTML-версия диаграмм |
-| `report/diagrams.css` | Стили HTML-диаграмм |
-| `report/required_diagrams_assets` | PNG-версии нужных диаграмм |
-| `report/Методические_...pdf` | Методические материалы |
-| `report/Дополнительно_...docx` | Шаблон оформления |
-"# Flutter" 
