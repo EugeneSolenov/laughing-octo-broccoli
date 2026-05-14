@@ -1,11 +1,22 @@
 .venv
+Include
+Lib
+Scripts
 __pycache__
 *.pyc
 .pytest_cache
+.pytest-*
 .mypy_cache
 .ruff_cache
 .cache
+.playwright-cli
+.playwright-runtime
+test-results
+material
+output
+report
 .env
+-
 
 frontend/node_modules
 frontend/dist

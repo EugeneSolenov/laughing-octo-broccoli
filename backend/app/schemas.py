@@ -95,16 +95,19 @@ class CsrfTokenResponse(BaseModel):
 
 class VoiceTweetRead(BaseModel):
     id: int
-    audio_url: str
+    audio_url: str | None
+    duration_seconds: float | None = None
     caption: str | None
     transcription_text: str | None
     status: TweetStatus
-    mime_type: str
+    mime_type: str | None
     error_message: str | None
     likes_count: int = 0
+    dislikes_count: int = 0
     reposts_count: int = 0
     reply_count: int = 0
     liked_by_viewer: bool = False
+    disliked_by_viewer: bool = False
     reposted_by_viewer: bool = False
     created_at: datetime
     parent_tweet_id: int | None = None
@@ -128,7 +131,7 @@ class PostDetailResponse(BaseModel):
 
 
 class TweetUpdateRequest(BaseModel):
-    caption: str | None = Field(default=None, max_length=280)
+    caption: str | None = Field(default=None, max_length=500)
     transcription_text: str | None = Field(default=None, max_length=5000)
 
 

@@ -27,7 +27,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    profiles: ["ops"]
     restart: "no"
     working_dir: /app/backend
     env_file:
@@ -52,6 +51,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:

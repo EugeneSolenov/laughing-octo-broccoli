@@ -32,6 +32,11 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 ALLOWED_AUDIO_TYPES = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/m4a": ".m4a",
+    "audio/x-m4a": ".m4a",
     "audio/ogg": ".ogg",
     "application/ogg": ".ogg",
     "audio/webm": ".webm",
@@ -42,6 +47,9 @@ ALLOWED_AUDIO_TYPES = {
 }
 
 EXTENSION_TO_AUDIO_TYPE = {
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
     ".ogg": "audio/ogg",
     ".oga": "audio/ogg",
     ".webm": "audio/webm",
@@ -59,6 +67,10 @@ def _sniff_audio_type(audio: UploadFile) -> str | None:
             return "audio/webm"
         if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WAVE":
             return "audio/wav"
+        if header.startswith(b"ID3") or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+            return "audio/mpeg"
+        if len(header) >= 12 and header[4:8] == b"ftyp":
+            return "audio/mp4"
         return None
     finally:
         audio.file.seek(current_position)
@@ -80,7 +92,7 @@ def _resolve_audio_type(audio: UploadFile) -> tuple[str, str]:
 
     raise HTTPException(
         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-        detail="Only OGG, WebM, and WAV audio uploads are supported.",
+        detail="Only MP3, M4A, OGG, WebM, and WAV audio uploads are supported.",
     )
 
 
@@ -188,48 +200,62 @@ def _create_tweet_and_enqueue(
     *,
     db: Session,
     current_user: User,
-    audio: UploadFile,
+    audio: UploadFile | None,
     caption: str | None,
     parent_tweet_id: int | None,
     trim_start_seconds: float | None,
     trim_end_seconds: float | None,
 ) -> VoiceTweet:
-    try:
-        audio_url, resolved_content_type, _ = _persist_upload(
-            audio,
-            user_id=current_user.id,
-            trim_start_seconds=trim_start_seconds,
-            trim_end_seconds=trim_end_seconds,
-        )
-    except MediaProcessingError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    normalized_caption = caption.strip() if caption and caption.strip() else None
+    audio_url: str | None = None
+    resolved_content_type: str | None = None
+    duration_seconds: float | None = None
 
     parent_tweet = None
     if parent_tweet_id is not None:
         parent_tweet = _load_tweet_or_404(db, parent_tweet_id)
         _assert_viewer_can_access_tweet(db, tweet=parent_tweet, viewer=current_user)
+        if parent_tweet.parent_tweet_id is not None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Replies to comments are disabled.")
+
+    if audio is not None:
+        try:
+            audio_url, resolved_content_type, duration_seconds = _persist_upload(
+                audio,
+                user_id=current_user.id,
+                trim_start_seconds=trim_start_seconds,
+                trim_end_seconds=trim_end_seconds,
+            )
+        except MediaProcessingError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    elif parent_tweet_id is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Audio is required for a new post.")
+    elif not normalized_caption:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Comment text is required.")
 
     tweet = VoiceTweet(
         user_id=current_user.id,
         parent_tweet_id=parent_tweet_id,
         audio_url=audio_url,
-        caption=caption.strip() if caption and caption.strip() else None,
+        duration_seconds=duration_seconds,
+        caption=normalized_caption,
         mime_type=resolved_content_type,
-        status=TweetStatus.processing,
+        status=TweetStatus.processing if audio_url else TweetStatus.completed,
     )
     db.add(tweet)
     db.commit()
     db.refresh(tweet)
 
-    try:
-        queue_transcription(tweet.id)
-    except Exception:
-        logger.exception("Failed to enqueue transcription task", extra={"tweet_id": tweet.id})
-        tweet.status = TweetStatus.error
-        tweet.error_message = "Failed to enqueue transcription task."
-        db.add(tweet)
-        db.commit()
-        db.refresh(tweet)
+    if audio_url:
+        try:
+            queue_transcription(tweet.id)
+        except Exception:
+            logger.exception("Failed to enqueue transcription task", extra={"tweet_id": tweet.id})
+            tweet.status = TweetStatus.error
+            tweet.error_message = "Failed to enqueue transcription task."
+            db.add(tweet)
+            db.commit()
+            db.refresh(tweet)
 
     if parent_tweet is None:
         publish_public_event("tweet.created", tweet_id=tweet.id, user_id=current_user.id)
@@ -394,7 +420,7 @@ def reply_to_tweet(
     response: Response,
     tweet_id: int,
     current_user: AuthenticatedUser,
-    audio: UploadFile = File(...),
+    audio: UploadFile | None = File(default=None),
     caption: str | None = Form(default=None),
     trim_start_seconds: float | None = Form(default=None),
     trim_end_seconds: float | None = Form(default=None),
@@ -487,6 +513,12 @@ def delete_tweet(
 def like_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> VoiceTweetRead:
     tweet = _load_tweet_or_404(db, tweet_id)
     _assert_viewer_can_access_tweet(db, tweet=tweet, viewer=current_user)
+    db.execute(
+        delete(tweet_reposts).where(
+            tweet_reposts.c.user_id == current_user.id,
+            tweet_reposts.c.tweet_id == tweet_id,
+        )
+    )
     already_liked = db.scalar(
         select(tweet_likes.c.tweet_id).where(
             tweet_likes.c.user_id == current_user.id,
@@ -495,15 +527,17 @@ def like_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = Dep
     )
     if already_liked is None:
         db.execute(insert(tweet_likes).values(user_id=current_user.id, tweet_id=tweet_id))
-        notification = create_notification(
-            db,
-            user_id=tweet.user_id,
-            notification_type=NotificationType.like,
-            actor_id=current_user.id,
-            tweet_id=tweet_id,
-        )
+        notification = None
+        if tweet.user.notifications_enabled:
+            notification = create_notification(
+                db,
+                user_id=tweet.user_id,
+                notification_type=NotificationType.like,
+                actor_id=current_user.id,
+                tweet_id=tweet_id,
+            )
         db.commit()
-        if notification and tweet.user.notifications_enabled:
+        if notification:
             publish_user_event(
                 tweet.user_id,
                 "notification.created",
@@ -531,10 +565,17 @@ def unlike_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = D
     return serialize_tweet(tweet, context=context)
 
 
-@router.post("/tweets/{tweet_id}/repost", response_model=VoiceTweetRead)
-def repost_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> VoiceTweetRead:
+@router.post("/tweets/{tweet_id}/dislike", response_model=VoiceTweetRead)
+@router.post("/tweets/{tweet_id}/repost", response_model=VoiceTweetRead, include_in_schema=False)
+def dislike_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> VoiceTweetRead:
     tweet = _load_tweet_or_404(db, tweet_id)
     _assert_viewer_can_access_tweet(db, tweet=tweet, viewer=current_user)
+    db.execute(
+        delete(tweet_likes).where(
+            tweet_likes.c.user_id == current_user.id,
+            tweet_likes.c.tweet_id == tweet_id,
+        )
+    )
     already_reposted = db.scalar(
         select(tweet_reposts.c.tweet_id).where(
             tweet_reposts.c.user_id == current_user.id,
@@ -543,29 +584,15 @@ def repost_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = D
     )
     if already_reposted is None:
         db.execute(insert(tweet_reposts).values(user_id=current_user.id, tweet_id=tweet_id))
-        notification = create_notification(
-            db,
-            user_id=tweet.user_id,
-            notification_type=NotificationType.repost,
-            actor_id=current_user.id,
-            tweet_id=tweet_id,
-        )
         db.commit()
-        if notification and tweet.user.notifications_enabled:
-            publish_user_event(
-                tweet.user_id,
-                "notification.created",
-                notification_id=notification.id,
-                notification_type=notification.type.value,
-                tweet_id=tweet_id,
-            )
     context = _tweet_context_for_single(db, tweet=tweet, viewer=current_user)
     publish_public_event("tweet.engagement_updated", tweet_id=tweet_id, user_id=current_user.id)
     return serialize_tweet(tweet, context=context)
 
 
-@router.delete("/tweets/{tweet_id}/repost", response_model=VoiceTweetRead)
-def unrepost_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> VoiceTweetRead:
+@router.delete("/tweets/{tweet_id}/dislike", response_model=VoiceTweetRead)
+@router.delete("/tweets/{tweet_id}/repost", response_model=VoiceTweetRead, include_in_schema=False)
+def undislike_tweet(tweet_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> VoiceTweetRead:
     tweet = _load_tweet_or_404(db, tweet_id)
     db.execute(
         delete(tweet_reposts).where(

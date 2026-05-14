@@ -69,8 +69,12 @@ def db_session(db_engine) -> Iterator[Session]:
 
 @pytest.fixture()
 def client(db_engine) -> Iterator[TestClient]:
+    main_module.app.state.limiter.reset()
     with TestClient(main_module.app) as test_client:
-        yield test_client
+        try:
+            yield test_client
+        finally:
+            main_module.app.state.limiter.reset()
 
 
 @pytest.fixture()

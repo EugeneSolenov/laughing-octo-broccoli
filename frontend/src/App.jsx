@@ -1,11 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, Bell, Feather, Home, LoaderCircle, Search, Shield, User } from "lucide-react";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { ArrowLeft, Bell, Eye, EyeOff, Home, LoaderCircle, Mic, Search, Shield, User } from "lucide-react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router-dom";
 
 import { ApiError, apiFetch, createEventSource, getMediaUrl } from "./api/client";
 import AdminDashboard from "./components/AdminDashboard.jsx";
-import EditProfileDialog from "./components/EditProfileDialog.jsx";
+import BrandMark from "./components/BrandMark.jsx";
 import NotificationSheet from "./components/NotificationSheet.jsx";
 import PostCard from "./components/PostCard.jsx";
 import PostComposer from "./components/PostComposer.jsx";
@@ -14,21 +14,36 @@ import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import PublicProfilePage from "./components/PublicProfilePage.jsx";
 import RouteErrorBoundary from "./components/RouteErrorBoundary.jsx";
 import SearchPanel from "./components/SearchPanel.jsx";
-import Sidebar from "./components/Sidebar.jsx";
 import SettingsPage from "./components/SettingsPage.jsx";
-import OnboardingChecklist from "./components/OnboardingChecklist.jsx";
+import Sidebar from "./components/Sidebar.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useToast } from "./context/ToastContext.jsx";
 
 const FEED_TABS = [
-  { key: "for-you", label: "For you" },
-  { key: "following", label: "Following" },
+  { key: "for-you", label: "Для вас" },
+  { key: "following", label: "Подписки" },
 ];
 
 const DEFAULT_HIGHLIGHTS = [
-  { title: "Voice AI", meta: "Technology - Trending", count: "42.5K posts" },
-  { title: "Creator updates", meta: "Social media - Live", count: "18.4K posts" },
-  { title: "Audio-first communities", meta: "Design - New", count: "7,482 posts" },
+  { title: "голосовые дневники", meta: "Слушают сейчас", count: "Новые разговоры" },
+  { title: "полевые записи", meta: "Авторы", count: "Свежие клипы каждый час" },
+  { title: "монтаж клипов", meta: "Процесс", count: "Запись, обрезка, публикация" },
+];
+
+const AUTH_SOUND_BARS = [48, 74, 56, 92, 68, 104, 72, 118, 64, 88, 70, 98];
+const AUTH_SIGNAL_ITEMS = [
+  {
+    title: "Запись прямо в браузере",
+    detail: "Захватывайте чистое моно-аудио в один клик и публикуйте с того же экрана.",
+  },
+  {
+    title: "Обрезка перед публикацией",
+    detail: "Подчистите начало и конец записи до того, как она появится в ленте.",
+  },
+  {
+    title: "Комментарии рядом с постом",
+    detail: "Обсуждение, транскрипция и слушатели остаются в одном месте.",
+  },
 ];
 
 const LIVE_REFRESH_EVENTS = new Set([
@@ -37,6 +52,73 @@ const LIVE_REFRESH_EVENTS = new Set([
   "tweet.engagement_updated",
   "tweet.transcription_updated",
 ]);
+const MAIN_COLUMN_SCROLL_POSITIONS = new Map();
+const MAIN_COLUMN_SCROLL_STORAGE_PREFIX = "voice:main-scroll:";
+const MAIN_COLUMN_PENDING_SCROLL_KEY = "voice:pending-main-scroll-key";
+let lastBrowserNavigationWasPop = false;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    lastBrowserNavigationWasPop = true;
+  });
+}
+
+function buildScrollStorageKey(location) {
+  return `${location.pathname}${location.search}`;
+}
+
+function readMainColumnScrollPosition(key) {
+  if (MAIN_COLUMN_SCROLL_POSITIONS.has(key)) {
+    return MAIN_COLUMN_SCROLL_POSITIONS.get(key);
+  }
+
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  const storedValue = window.sessionStorage.getItem(`${MAIN_COLUMN_SCROLL_STORAGE_PREFIX}${key}`);
+  const parsedValue = Number(storedValue);
+  return Number.isFinite(parsedValue) ? parsedValue : undefined;
+}
+
+function writeMainColumnScrollPosition(key, scrollTop) {
+  MAIN_COLUMN_SCROLL_POSITIONS.set(key, scrollTop);
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(`${MAIN_COLUMN_SCROLL_STORAGE_PREFIX}${key}`, String(scrollTop));
+  }
+}
+
+function readPendingMainColumnScrollKey() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.sessionStorage.getItem(MAIN_COLUMN_PENDING_SCROLL_KEY) || "";
+}
+
+function writePendingMainColumnScrollKey(key) {
+  if (typeof window !== "undefined") {
+    window.sessionStorage.setItem(MAIN_COLUMN_PENDING_SCROLL_KEY, key);
+  }
+}
+
+function clearPendingMainColumnScrollKey(key) {
+  if (typeof window !== "undefined" && readPendingMainColumnScrollKey() === key) {
+    window.sessionStorage.removeItem(MAIN_COLUMN_PENDING_SCROLL_KEY);
+  }
+}
+
+function resolvePostAuthPath(candidatePath) {
+  if (
+    typeof candidatePath === "string" &&
+    candidatePath.length > 0 &&
+    candidatePath !== "/login" &&
+    candidatePath !== "/register"
+  ) {
+    return candidatePath;
+  }
+
+  return "/";
+}
 
 function usePageVisibility() {
   const [isVisible, setIsVisible] = useState(() =>
@@ -56,8 +138,8 @@ function useNetworkToasts() {
   const showToast = useToast();
 
   useEffect(() => {
-    const handleOnline = () => showToast("Back online.", "success");
-    const handleOffline = () => showToast("You're offline. Some actions may fail.", "info");
+    const handleOnline = () => showToast("Соединение восстановлено.", "success");
+    const handleOffline = () => showToast("Вы офлайн. Некоторые действия могут не сработать.", "info");
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
@@ -86,27 +168,35 @@ function mergeTweetsWithClientState(incomingTweets, existingTweets = []) {
   });
 }
 
+function appendTweetsWithClientState(currentTweets, incomingTweets) {
+  const existingIds = new Set(currentTweets.map((tweet) => tweet.id));
+  const incomingWithClientState = mergeTweetsWithClientState(incomingTweets, currentTweets);
+  return [...currentTweets, ...incomingWithClientState.filter((tweet) => !existingIds.has(tweet.id))];
+}
+
 function buildHighlights(tweets) {
   if (!tweets.length) {
     return DEFAULT_HIGHLIGHTS;
   }
 
-  const recent = tweets.slice(0, 3);
-
-  return recent.map((tweet, index) => ({
-    title: `${tweet.user.username} posted audio`,
-    meta: index === 0 ? "Live in the feed" : "Fresh voice post",
-    count: `${new Date(tweet.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`,
+  return tweets.slice(0, 3).map((tweet, index) => ({
+    title: tweet.caption || tweet.transcription_text?.split("\n")[0] || `${tweet.user.username} опубликовал запись`,
+    meta: index === 0 ? "Сейчас в ленте" : "Недавняя запись",
+    count: new Date(tweet.created_at).toLocaleDateString("ru-RU", { month: "short", day: "numeric" }),
   }));
 }
 
-function buildTweetsFeedPath(search, scope = "all") {
+function buildTweetsFeedPath(search, scope = "all", cursor = null) {
   const params = new URLSearchParams({ limit: "25" });
   if (search.trim()) {
     params.set("q", search.trim());
   }
   if (scope === "following") {
     params.set("scope", "following");
+  }
+  if (cursor?.created_at && cursor?.id) {
+    params.set("cursor_created_at", cursor.created_at);
+    params.set("cursor_id", String(cursor.id));
   }
   return `/tweets/feed?${params.toString()}`;
 }
@@ -130,21 +220,19 @@ function parseLiveEvent(event) {
 
 function LoadingPosts() {
   return (
-    <div>
+    <div className="post-list">
       {[0, 1, 2].map((item) => (
-        <div className="border-b border-x-border px-4 py-5 phone:px-5" key={item}>
-          <div className="flex gap-3">
-            <div className="h-10 w-10 rounded-full bg-[#1d1f23]" />
-            <div className="flex-1 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="skeleton-bar h-4 w-28 rounded-full animate-shimmer" />
-                <div className="skeleton-bar h-3 w-16 rounded-full animate-shimmer" />
+        <div className="m3-card" key={item} style={{ padding: 18 }}>
+          <div style={{ display: "flex", gap: 12 }}>
+            <div className="m3-skeleton" style={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0 }} />
+            <div style={{ flex: 1, display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div className="m3-skeleton" style={{ height: 12, width: 128 }} />
+                <div className="m3-skeleton" style={{ height: 12, width: 62 }} />
               </div>
-              <div className="rounded-[20px] border border-x-border bg-[#111214] p-4">
-                <div className="skeleton-bar h-3 rounded-full animate-shimmer" />
-                <div className="mt-2 skeleton-bar h-3 w-10/12 rounded-full animate-shimmer" />
-                <div className="mt-4 skeleton-bar h-14 rounded-[16px] animate-shimmer" />
-              </div>
+              <div className="m3-skeleton" style={{ height: 12, width: "88%" }} />
+              <div className="m3-skeleton" style={{ height: 78, borderRadius: 12 }} />
+              <div className="m3-skeleton" style={{ height: 96, borderRadius: 12 }} />
             </div>
           </div>
         </div>
@@ -155,95 +243,104 @@ function LoadingPosts() {
 
 function FeedTabs({ activeTab, onChange }) {
   return (
-    <div className="grid grid-cols-2">
-      {FEED_TABS.map((tab) => {
-        const active = activeTab === tab.key;
-
-        return (
+    <div className="feed-switch-shell">
+      <div className="feed-switch">
+        {FEED_TABS.map((tab) => (
           <button
-            className="relative flex items-center justify-center px-4 py-4 text-[15px] font-bold text-x-primary transition hover:bg-white/[0.03]"
+            className={["feed-switch__button", activeTab === tab.key ? "is-active" : ""].join(" ")}
             key={tab.key}
             onClick={() => onChange(tab.key)}
             type="button"
           >
-            <span className={active ? "text-x-primary" : "text-x-secondary"}>{tab.label}</span>
-            {active ? <motion.span className="absolute bottom-0 h-1 w-14 rounded-full bg-x-blue" layoutId="feed-underline" /> : null}
+            {tab.label}
           </button>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }
 
-function EmptyFeed({ description, title }) {
+function EmptyFeed({ actions = null, description, title }) {
   return (
-    <div className="px-4 py-10 phone:px-5">
-      <div className="rounded-[24px] border border-x-border bg-[#111214] p-6">
-        <h2 className="text-[31px] font-extrabold leading-8 text-x-primary">{title}</h2>
-        <p className="mt-3 max-w-md text-[15px] leading-6 text-x-secondary">{description}</p>
-      </div>
+    <div className="m3-card m3-empty empty-state-card">
+      <p className="m3-section-label">Пусто</p>
+      <h2 className="m3-title-medium empty-state-card__title" style={{ marginTop: 8, fontSize: 22 }}>
+        {title}
+      </h2>
+      <p className="m3-body-small empty-state-card__description" style={{ marginTop: 8, maxWidth: 420 }}>
+        {description}
+      </p>
+      {actions ? <div className="empty-state-card__actions">{actions}</div> : null}
     </div>
   );
 }
 
 function GuestPrompt() {
   return (
-    <div className="border-b border-x-border px-4 py-6 phone:px-5">
-      <div className="rounded-[24px] border border-x-border bg-[#111214] p-6">
-        <p className="text-[31px] font-extrabold leading-8 text-x-primary">Join Voice Atlas today</p>
-        <p className="mt-3 text-[15px] leading-6 text-x-secondary">
-          Create an account to post voice notes, follow people you care about, and personalize your feed.
-        </p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link className="rounded-full bg-white px-5 py-2.5 text-[15px] font-bold text-black transition hover:bg-white/90" to="/register">
-            Create account
-          </Link>
-          <Link className="rounded-full border border-x-border px-5 py-2.5 text-[15px] font-bold text-x-primary transition hover:bg-x-hover" to="/login">
-            Log in
-          </Link>
+    <section className="m3-panel" style={{ padding: 20 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 16, marginBottom: 18 }}>
+        <BrandMark size={58} />
+        <div>
+          <p className="m3-section-label">Flutter</p>
+          <h2 className="m3-title-medium" style={{ marginTop: 6, fontSize: 22 }}>
+            Присоединяйтесь к аудиоленте
+          </h2>
+          <p className="m3-body-small" style={{ marginTop: 8, maxWidth: 440 }}>
+            Записывайте голосовые посты, подписывайтесь на авторов и слушайте обсуждения с аккуратной транскрипцией.
+          </p>
         </div>
       </div>
-    </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Link className="m3-button m3-button-filled m3-fab m3-interactive" to="/register">
+          Создать аккаунт
+        </Link>
+        <Link className="m3-button m3-button-outlined m3-interactive" to="/login">
+          Войти
+        </Link>
+      </div>
+    </section>
   );
 }
 
-function MobileNav({ onCompose, onOpenNotifications, onOpenSearch, unreadCount = 0, user }) {
+function MobileNav({ composeActive = false, notificationsActive = false, onCompose, onOpenNotifications, onOpenSearch, searchActive = false, unreadCount = 0, user }) {
   const location = useLocation();
-  const navigate = useNavigate();
 
   const items = [
-    { key: "home", label: "Home", icon: Home, active: location.pathname === "/", onClick: () => navigate("/") },
-    { key: "search", label: "Open search", icon: Search, active: false, onClick: onOpenSearch },
-    { key: "compose", label: "Create post", icon: Feather, active: false, onClick: onCompose },
-    { key: "alerts", label: "Open notifications", icon: Bell, active: false, onClick: onOpenNotifications },
-    {
-      key: "profile",
-      label: "Open profile",
-      icon: User,
-      active: location.pathname.startsWith("/profile"),
-      onClick: () => navigate(user ? "/profile" : "/login"),
-    },
+    { key: "home", label: "Главная", icon: Home, active: location.pathname === "/", to: "/" },
+    { key: "search", label: "Поиск", icon: Search, active: searchActive, onClick: onOpenSearch },
+    { key: "compose", label: "Запись", icon: Mic, active: composeActive, onClick: onCompose },
+    { key: "alerts", label: "Уведомления", icon: Bell, active: notificationsActive, onClick: onOpenNotifications, hasBadge: unreadCount > 0 },
+    { key: "profile", label: "Профиль", icon: User, active: location.pathname.startsWith("/profile"), to: user ? "/profile" : "/login" },
   ];
 
   return (
-    <nav className="tablet:hidden fixed inset-x-0 bottom-0 z-30 border-t border-x-border bg-black/90 backdrop-blur-md mobile-nav-safe">
-      <div className="mx-auto flex h-16 max-w-[600px] items-center justify-around">
+    <nav aria-label="Основная навигация" className="app-mobile-nav mobile-nav-safe">
+      <div className="app-mobile-nav__inner">
         {items.map((item) => {
           const Icon = item.icon;
-          return (
-            <button
-              aria-label={item.label}
-              className={["relative inline-flex h-11 w-11 items-center justify-center rounded-full transition", item.active ? "bg-x-hover text-x-primary" : "text-x-secondary"].join(" ")}
-              key={item.key}
-              onClick={item.onClick}
-              type="button"
+          const content = (
+            <span
+              className={["m3-nav-item", "m3-interactive", item.active ? "is-active" : ""].join(" ")}
+              style={{ minHeight: 48, minWidth: 48, padding: 0, justifyContent: "center" }}
             >
-              <Icon className="h-[22px] w-[22px]" fill={item.active ? "currentColor" : "none"} />
-              {item.key === "alerts" && unreadCount ? (
-                <span className="absolute right-1 top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-x-blue px-1.5 text-[10px] font-bold text-white">
-                  {unreadCount > 9 ? "9+" : unreadCount}
-                </span>
-              ) : null}
+              <span style={{ position: "relative", display: "inline-flex", width: 24, height: 24, alignItems: "center", justifyContent: "center" }}>
+                <Icon size={20} strokeWidth={item.active ? 2.2 : 1.8} />
+                {item.hasBadge ? <span className="m3-nav-item__badge" /> : null}
+              </span>
+            </span>
+          );
+
+          if (item.to) {
+            return (
+              <Link aria-label={item.label} key={item.key} to={item.to}>
+                {content}
+              </Link>
+            );
+          }
+
+          return (
+            <button aria-label={item.label} key={item.key} onClick={item.onClick} style={{ background: "none", border: 0, padding: 0 }} type="button">
+              {content}
             </button>
           );
         })}
@@ -258,11 +355,18 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
   const isPageVisible = usePageVisibility();
   const location = useLocation();
   const navigate = useNavigate();
+  const navigationType = useNavigationType();
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [notificationsRefreshToken, setNotificationsRefreshToken] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
+  const mainColumnRef = useRef(null);
+  const mainColumnScrollTopRef = useRef(0);
+  const pendingScrollRestoreRef = useRef(null);
+  const previousLocationRef = useRef(location);
+  const scrollStorageKey = buildScrollStorageKey(location);
 
   const refreshNotificationsMeta = useCallback(async () => {
     if (!user) {
@@ -274,13 +378,113 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
       const data = await apiFetch("/notifications?limit=1");
       setUnreadCount(data.unread_count || 0);
     } catch {
-      // Ignore notification refresh failures here. The panel itself surfaces actionable errors.
+      // Ignore notification refresh failures here.
     }
   }, [user]);
 
   useEffect(() => {
     void refreshNotificationsMeta();
   }, [refreshNotificationsMeta]);
+
+  useLayoutEffect(() => {
+    const mainColumn = mainColumnRef.current;
+    if (!mainColumn) {
+      return;
+    }
+
+    const previousLocation = previousLocationRef.current;
+    const previousScrollKey = buildScrollStorageKey(previousLocation);
+    const shouldRestoreHistoryScroll = navigationType === "POP" || lastBrowserNavigationWasPop;
+    let nextScrollTop = 0;
+
+    if (shouldRestoreHistoryScroll) {
+      nextScrollTop = readMainColumnScrollPosition(scrollStorageKey) ?? 0;
+    } else if (previousLocation.pathname === location.pathname) {
+      nextScrollTop = readMainColumnScrollPosition(previousScrollKey) ?? mainColumn.scrollTop;
+    }
+
+    lastBrowserNavigationWasPop = false;
+
+    if (nextScrollTop > 0) {
+      pendingScrollRestoreRef.current = { key: scrollStorageKey, top: nextScrollTop };
+      writePendingMainColumnScrollKey(scrollStorageKey);
+    } else {
+      pendingScrollRestoreRef.current = null;
+      clearPendingMainColumnScrollKey(scrollStorageKey);
+    }
+
+    const restoreScroll = () => {
+      mainColumn.scrollTo({ top: nextScrollTop, behavior: "auto" });
+    };
+
+    if (nextScrollTop <= 0) {
+      restoreScroll();
+      previousLocationRef.current = location;
+      return undefined;
+    }
+
+    let resizeObserver;
+    if (nextScrollTop > 0 && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(restoreScroll);
+      resizeObserver.observe(mainColumn);
+      if (mainColumn.firstElementChild) {
+        resizeObserver.observe(mainColumn.firstElementChild);
+      }
+    }
+
+    restoreScroll();
+    const frameId = window.requestAnimationFrame(restoreScroll);
+    const shortDelayId = window.setTimeout(restoreScroll, 120);
+    const mediumDelayId = window.setTimeout(restoreScroll, 650);
+    const longDelayId = window.setTimeout(() => {
+      restoreScroll();
+      pendingScrollRestoreRef.current = null;
+      resizeObserver?.disconnect();
+      clearPendingMainColumnScrollKey(scrollStorageKey);
+    }, 1800);
+    previousLocationRef.current = location;
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(shortDelayId);
+      window.clearTimeout(mediumDelayId);
+      window.clearTimeout(longDelayId);
+      resizeObserver?.disconnect();
+    };
+  }, [location, navigationType, scrollStorageKey]);
+
+  useEffect(() => {
+    const mainColumn = mainColumnRef.current;
+    if (!mainColumn) {
+      return undefined;
+    }
+
+    const persistScrollPosition = (scrollTop) => {
+      const normalizedScrollTop = Math.max(0, Math.round(scrollTop));
+      mainColumnScrollTopRef.current = normalizedScrollTop;
+      const pendingRestore = pendingScrollRestoreRef.current;
+      if (
+        pendingRestore?.key === scrollStorageKey &&
+        pendingRestore.top > normalizedScrollTop
+      ) {
+        writeMainColumnScrollPosition(scrollStorageKey, pendingRestore.top);
+        return;
+      }
+      writeMainColumnScrollPosition(scrollStorageKey, normalizedScrollTop);
+    };
+
+    const storeCurrentScrollPosition = () => {
+      persistScrollPosition(mainColumn.scrollTop);
+    };
+
+    storeCurrentScrollPosition();
+    mainColumn.addEventListener("scroll", storeCurrentScrollPosition, { passive: true });
+
+    return () => {
+      persistScrollPosition(mainColumnScrollTopRef.current);
+      mainColumn.removeEventListener("scroll", storeCurrentScrollPosition);
+    };
+  }, [scrollStorageKey]);
 
   useEffect(() => {
     if (!isPageVisible) {
@@ -302,7 +506,7 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
         void refreshNotificationsMeta();
         setNotificationsRefreshToken((current) => current + 1);
         showToast(
-          payload.notification_type === "transcription_ready" ? "A voice post finished transcribing." : "New notification received.",
+          payload.notification_type === "transcription_ready" ? "Транскрипция записи готова." : "Получено новое уведомление.",
           payload.notification_type === "transcription_ready" ? "success" : "info",
         );
       }
@@ -317,8 +521,11 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
   }, [isPageVisible, onLiveEvent, refreshNotificationsMeta, showToast]);
 
   const handleSearch = () => {
-    if (typeof window !== "undefined" && window.innerWidth >= 1280) {
-      document.getElementById("global-search-input")?.focus();
+    const railSearchInput = document.querySelector('[data-global-search-input="rail"]');
+    const isRailVisible = railSearchInput && railSearchInput.getClientRects().length > 0;
+
+    if (isRailVisible) {
+      railSearchInput.focus();
       return;
     }
 
@@ -348,12 +555,52 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
     setIsNotificationsOpen(true);
   };
 
+  const closeSearch = useCallback(
+    ({ clear = false } = {}) => {
+      if (clear) {
+        setSearch("");
+      }
+      setIsSearchOpen(false);
+      setIsSearchFocused(false);
+    },
+    [setSearch],
+  );
+
+  const isSearchActive = isSearchOpen || isSearchFocused || Boolean(search.trim());
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      if (isComposerOpen) {
+        return;
+      }
+
+      if (isSearchOpen) {
+        closeSearch({ clear: true });
+        return;
+      }
+
+      if (isNotificationsOpen) {
+        setIsNotificationsOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeSearch, isComposerOpen, isNotificationsOpen, isSearchOpen]);
+
   return (
-    <div className="min-h-screen bg-black text-x-primary">
-      <div className="mx-auto flex max-w-[1275px] justify-center">
-        <div className="hidden tablet:block tablet:w-[88px] desktop:w-[275px]">
-          <div className="fixed top-0 h-screen w-[88px] desktop:w-[275px]">
+    <div className="app-shell">
+      <div className="app-grid">
+        <div className="app-nav-column">
+          <div className="app-nav-sticky">
             <Sidebar
+              isComposerActive={isComposerOpen}
+              isNotificationsActive={isNotificationsOpen}
+              isSearchActive={isSearchActive}
               onCompose={handleCompose}
               onLogout={() => void handleLogout()}
               onOpenNotifications={handleNotifications}
@@ -364,21 +611,31 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
           </div>
         </div>
 
-        <main className="min-h-screen w-full max-w-[600px] border-x border-x-border pb-20 tablet:pb-0">
-          {typeof children === "function" ? children({ openComposer: handleCompose, openSearch: handleSearch }) : children}
+        <main className="app-main-column" ref={mainColumnRef}>
+          {typeof children === "function"
+            ? children({
+                openComposer: handleCompose,
+                openNotifications: handleNotifications,
+                openSearch: handleSearch,
+                unreadCount,
+              })
+            : children}
         </main>
 
-        <div className="hidden desktop:block desktop:w-[350px] desktop:pl-[30px]">
-          <div className="sticky top-0 h-screen overflow-y-auto pb-10">
-            <SearchPanel highlights={rightRailItems} search={search} setSearch={setSearch} />
+        <div className="app-side-column">
+          <div className="app-side-sticky">
+            <SearchPanel highlights={rightRailItems} onInputFocusChange={setIsSearchFocused} search={search} setSearch={setSearch} />
           </div>
         </div>
       </div>
 
       <MobileNav
+        composeActive={isComposerOpen}
+        notificationsActive={isNotificationsOpen}
         onCompose={handleCompose}
         onOpenNotifications={handleNotifications}
         onOpenSearch={handleSearch}
+        searchActive={isSearchActive}
         unreadCount={unreadCount}
         user={user}
       />
@@ -392,22 +649,10 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
 
       <AnimatePresence>
         {isSearchOpen ? (
-          <motion.div
-            animate={{ opacity: 1 }}
-            className="desktop:hidden fixed inset-0 z-40 bg-black/70 backdrop-blur-sm"
-            exit={{ opacity: 0 }}
-            initial={{ opacity: 0 }}
-            onClick={() => setIsSearchOpen(false)}
-          >
-            <motion.div
-              animate={{ opacity: 1, y: 0 }}
-              className="mx-auto mt-0 max-w-[600px] px-4 py-4"
-              exit={{ opacity: 0, y: 16 }}
-              initial={{ opacity: 0, y: 16 }}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="rounded-[24px] border border-x-border bg-black p-4 shadow-lift">
-                <SearchPanel highlights={rightRailItems} mode="sheet" onClose={() => setIsSearchOpen(false)} search={search} setSearch={setSearch} />
+          <motion.div animate={{ opacity: 1 }} className="m3-overlay" exit={{ opacity: 0 }} initial={{ opacity: 0 }} onClick={() => closeSearch({ clear: true })}>
+            <motion.div animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} initial={{ opacity: 0, y: 16 }} onClick={(event) => event.stopPropagation()}>
+              <div className="m3-sheet" style={{ padding: 20 }}>
+                <SearchPanel highlights={rightRailItems} mode="sheet" onClose={closeSearch} search={search} setSearch={setSearch} />
               </div>
             </motion.div>
           </motion.div>
@@ -416,16 +661,10 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
 
       <AnimatePresence>
         {isComposerOpen && renderComposer ? (
-          <motion.div
-            animate={{ opacity: 1 }}
-            className="fixed inset-0 z-50 bg-black/75 px-4 py-6 backdrop-blur-sm"
-            exit={{ opacity: 0 }}
-            initial={{ opacity: 0 }}
-            onClick={() => setIsComposerOpen(false)}
-          >
+          <motion.div animate={{ opacity: 1 }} className="m3-overlay m3-overlay--composer" exit={{ opacity: 0 }} initial={{ opacity: 0 }}>
             <motion.div
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="mx-auto max-w-[680px]"
+              className="voice-recorder-shell"
               exit={{ opacity: 0, scale: 0.98, y: 12 }}
               initial={{ opacity: 0, scale: 0.98, y: 12 }}
               onClick={(event) => event.stopPropagation()}
@@ -439,64 +678,204 @@ function AppShell({ children, onLiveEvent, renderComposer, rightRailItems, searc
   );
 }
 
-function HomePage({ activeTab, error, feed, loading, onCreated, onOpenComposer, onOpenSearch, onRefreshRequested, search, setActiveTab, user }) {
+function HomePage({
+  activeTab,
+  error,
+  feed,
+  hasMore = false,
+  loading,
+  loadingMore = false,
+  onCreated,
+  onLoadMore,
+  onOpenComposer,
+  onOpenNotifications,
+  onOpenSearch,
+  onRefreshRequested,
+  search,
+  setActiveTab,
+  user,
+}) {
+  const location = useLocation();
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
+  const headerHiddenRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
+  const loadMoreRef = useRef(null);
+
+  useEffect(() => {
+    const scrollContainer = document.querySelector(".app-main-column");
+    if (!scrollContainer) {
+      return undefined;
+    }
+
+    lastScrollTopRef.current = scrollContainer.scrollTop;
+    let frameId = 0;
+
+    const updateHeaderVisibility = (nextHidden) => {
+      if (headerHiddenRef.current === nextHidden) {
+        return;
+      }
+      headerHiddenRef.current = nextHidden;
+      setIsHeaderHidden(nextHidden);
+    };
+
+    const handleScroll = () => {
+      if (frameId) {
+        return;
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        const currentScrollTop = scrollContainer.scrollTop;
+        const delta = currentScrollTop - lastScrollTopRef.current;
+
+        if (currentScrollTop <= 48) {
+          updateHeaderVisibility(false);
+        } else if (delta > 18 && currentScrollTop > 96) {
+          updateHeaderVisibility(true);
+        } else if (delta < -18) {
+          updateHeaderVisibility(false);
+        }
+
+        lastScrollTopRef.current = currentScrollTop;
+        frameId = 0;
+      });
+    };
+
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+      scrollContainer.removeEventListener("scroll", handleScroll);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return undefined;
+    }
+
+    const scrollContainer = document.querySelector(".app-main-column");
+    const scrollKey = buildScrollStorageKey(location);
+    const pendingScrollKey = readPendingMainColumnScrollKey();
+    const storedScrollTop = readMainColumnScrollPosition(scrollKey) ?? 0;
+
+    if (!scrollContainer || pendingScrollKey !== scrollKey || storedScrollTop <= 0) {
+      return undefined;
+    }
+
+    const restoreScroll = () => {
+      scrollContainer.scrollTo({ top: storedScrollTop, behavior: "auto" });
+      if (Math.abs(scrollContainer.scrollTop - storedScrollTop) <= 2) {
+        clearPendingMainColumnScrollKey(scrollKey);
+      }
+    };
+
+    const retryDeadline = Date.now() + 1400;
+    let retryTimeoutId = 0;
+    const keepRestoring = () => {
+      restoreScroll();
+      if (Math.abs(scrollContainer.scrollTop - storedScrollTop) <= 2) {
+        return;
+      }
+      if (Date.now() < retryDeadline) {
+        retryTimeoutId = window.setTimeout(keepRestoring, 100);
+      }
+    };
+
+    restoreScroll();
+    const frameId = window.requestAnimationFrame(keepRestoring);
+    const timeoutId = window.setTimeout(keepRestoring, 120);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+      window.clearTimeout(retryTimeoutId);
+    };
+  }, [feed.length, loading, location]);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    const scrollContainer = document.querySelector(".app-main-column");
+    if (!sentinel || !scrollContainer || !hasMore || loading || loadingMore) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onLoadMore?.();
+        }
+      },
+      { root: scrollContainer, rootMargin: "520px 0px 520px 0px", threshold: 0.01 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadingMore, onLoadMore]);
+
   return (
     <section>
-      <header className="sticky top-0 z-20 border-b border-x-border bg-black/80 backdrop-blur-md">
-        <div className="flex items-center justify-between px-4 py-3 phone:px-5">
-          <p className="text-[20px] font-extrabold text-x-primary">Home</p>
-          <div className="flex items-center gap-2 tablet:hidden">
-            <button aria-label="Open search" className="x-icon-button h-10 w-10" onClick={onOpenSearch} type="button">
-              <Search className="h-5 w-5" />
-            </button>
-            <button aria-label="Create a voice post" className="x-icon-button h-10 w-10" onClick={onOpenComposer} type="button">
-              <Feather className="h-5 w-5" />
-            </button>
+      <header className={["top-app-bar", "top-app-bar--feed", isHeaderHidden ? "is-hidden" : ""].join(" ")}>
+        <div className="top-app-bar__frame">
+          <div className="top-app-bar__inner">
+            <div className="top-app-bar__heading-group">
+              <p className="m3-section-label top-app-bar__eyebrow">Слушать</p>
+              <h1 className="top-app-bar__title">Лента</h1>
+            </div>
+
+            <div className="top-app-bar__actions top-app-bar__actions--compact">
+              <button aria-label="Поиск" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={onOpenSearch} type="button">
+                <Search size={18} />
+              </button>
+              <button aria-label="Уведомления" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={onOpenNotifications} type="button">
+                <Bell size={18} />
+              </button>
+            </div>
           </div>
+          <FeedTabs activeTab={activeTab} onChange={setActiveTab} />
         </div>
-        <FeedTabs activeTab={activeTab} onChange={setActiveTab} />
       </header>
 
-      {user ? (
-        <>
-          <OnboardingChecklist onOpenComposer={onOpenComposer} onOpenSearch={onOpenSearch} user={user} />
-          <PostComposer onCreated={onCreated} user={user} />
-        </>
-      ) : (
-        <GuestPrompt />
-      )}
+      <div className="main-page-stack">
+        {!user ? <GuestPrompt /> : null}
+        {error ? <p className="m3-error">{error}</p> : null}
 
-      {error ? <p className="mx-4 mt-4 rounded-2xl border border-x-red/35 bg-x-red/10 px-4 py-3 text-[14px] text-red-100 phone:mx-5">{error}</p> : null}
-
-      {loading ? (
-        <LoadingPosts />
-      ) : activeTab === "following" && !user ? (
-        <EmptyFeed
-          description="Sign in and follow people to build a real following feed."
-          title="Your following feed starts after login"
-        />
-      ) : feed.length ? (
-        feed.map((tweet) => (
-          <PostCard
-            currentUser={user}
-            key={tweet.id}
-            onDeleted={(tweetId) => onCreated({ deletedId: tweetId })}
-            onRefreshRequested={onRefreshRequested}
-            tweet={tweet}
+        {loading ? (
+          <LoadingPosts />
+        ) : activeTab === "following" && !user ? (
+          <EmptyFeed description="Войдите и подпишитесь на авторов, чтобы собрать персональную ленту." title="Подписки доступны после входа" />
+        ) : feed.length ? (
+          <div className="post-list">
+            {feed.map((tweet) => (
+              <PostCard
+                currentUser={user}
+                key={tweet.id}
+                onDeleted={(tweetId) => onCreated({ deletedId: tweetId })}
+                onRefreshRequested={onRefreshRequested}
+                tweet={tweet}
+              />
+            ))}
+            <div aria-hidden="true" className="feed-load-more-sentinel" ref={loadMoreRef} />
+            {hasMore ? (
+              <button className="m3-button m3-button-outlined m3-interactive feed-load-more" disabled={loadingMore} onClick={onLoadMore} type="button">
+                {loadingMore ? "Загрузка…" : "Показать ещё"}
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <EmptyFeed
+            description={
+              search
+                ? "Попробуйте другой запрос или переключите вкладку ленты."
+                : activeTab === "following"
+                  ? "Подпишитесь на нескольких авторов, и их новые записи появятся здесь."
+                  : "Запишите первый голосовой пост или загляните немного позже."
+            }
+            title="Пока здесь пусто"
           />
-        ))
-      ) : (
-        <EmptyFeed
-          description={
-            search
-              ? "Try another search or switch feed tabs to see a different set of voice posts."
-              : activeTab === "following"
-                ? "Follow a few creators and their voice posts will show up here."
-                : "Record the first voice post or check back in a little later."
-          }
-          title="Nothing to hear right now"
-        />
-      )}
+        )}
+      </div>
     </section>
   );
 }
@@ -509,6 +888,9 @@ function HomeRoute({ search, setSearch }) {
   const [error, setError] = useState("");
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+
   const activeTab = useMemo(() => {
     const params = new URLSearchParams(location.search);
     return params.get("feed") === "following" ? "following" : "for-you";
@@ -522,6 +904,7 @@ function HomeRoute({ search, setSearch }) {
       } else {
         nextParams.delete("feed");
       }
+
       navigate(
         {
           pathname: location.pathname,
@@ -534,18 +917,27 @@ function HomeRoute({ search, setSearch }) {
   );
 
   const loadFeed = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ append = false, cursor = null, silent = false } = {}) => {
       try {
-        if (!silent) {
+        if (append) {
+          setLoadingMore(true);
+        } else if (!silent) {
           setLoading(true);
         }
-        const data = await apiFetch(buildTweetsFeedPath(deferredSearch, activeTab === "following" ? "following" : "all"));
-        setFeed((current) => mergeTweetsWithClientState(data.items, current));
+        const data = await apiFetch(buildTweetsFeedPath(deferredSearch, activeTab === "following" ? "following" : "all", cursor));
+        setFeed((current) =>
+          append
+            ? appendTweetsWithClientState(current, data.items || [])
+            : mergeTweetsWithClientState(data.items || [], current),
+        );
+        setNextCursor(data.next_cursor || null);
         setError("");
       } catch (caughtError) {
-        setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load the feed.");
+        setError(caughtError instanceof ApiError ? caughtError.message : "Не удалось загрузить ленту.");
       } finally {
-        if (!silent) {
+        if (append) {
+          setLoadingMore(false);
+        } else if (!silent) {
           setLoading(false);
         }
       }
@@ -565,6 +957,7 @@ function HomeRoute({ search, setSearch }) {
     },
     [loadFeed],
   );
+
   const highlights = useMemo(() => buildHighlights(feed), [feed]);
 
   const handleCreated = useCallback((tweet) => {
@@ -576,6 +969,14 @@ function HomeRoute({ search, setSearch }) {
     setFeed((current) => [tweet, ...current.filter((item) => item.id !== tweet.id)]);
   }, []);
 
+  const loadMore = useCallback(() => {
+    if (!nextCursor || loading || loadingMore) {
+      return;
+    }
+
+    void loadFeed({ append: true, cursor: nextCursor, silent: true });
+  }, [loadFeed, loading, loadingMore, nextCursor]);
+
   return (
     <AppShell
       onLiveEvent={handleLiveEvent}
@@ -584,14 +985,18 @@ function HomeRoute({ search, setSearch }) {
       search={search}
       setSearch={setSearch}
     >
-      {({ openComposer, openSearch }) => (
+      {({ openComposer, openNotifications, openSearch }) => (
         <HomePage
           activeTab={activeTab}
           error={error}
           feed={feed}
+          hasMore={Boolean(nextCursor)}
           loading={loading}
+          loadingMore={loadingMore}
           onCreated={handleCreated}
+          onLoadMore={loadMore}
           onOpenComposer={openComposer}
+          onOpenNotifications={openNotifications}
           onOpenSearch={openSearch}
           onRefreshRequested={() => void loadFeed({ silent: true })}
           search={search}
@@ -608,7 +1013,6 @@ function ProfileRoute({ search, setSearch }) {
   const navigate = useNavigate();
   const deferredSearch = useDeferredValue(search);
   const [error, setError] = useState("");
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
 
@@ -629,7 +1033,7 @@ function ProfileRoute({ search, setSearch }) {
         );
         setError("");
       } catch (caughtError) {
-        setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load your profile.");
+        setError(caughtError instanceof ApiError ? caughtError.message : "Не удалось загрузить профиль.");
       } finally {
         if (!silent) {
           setLoading(false);
@@ -689,119 +1093,111 @@ function ProfileRoute({ search, setSearch }) {
       search={search}
       setSearch={setSearch}
     >
-      {({ openComposer, openSearch }) => (
+      {({ openComposer }) => (
         <section>
-          <header className="sticky top-0 z-20 border-b border-x-border bg-black/80 backdrop-blur-md">
-            <div className="flex items-center justify-between px-4 py-3 phone:px-5">
-              <div className="flex items-center gap-4">
-                <button aria-label="Go back home" className="x-icon-button h-9 w-9" onClick={() => navigate("/")} type="button">
-                  <ArrowLeft className="h-5 w-5" />
+          <header className="top-app-bar">
+            <div className="top-app-bar__inner page-header-bar">
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button aria-label="Назад" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={() => navigate("/")} type="button">
+                  <ArrowLeft size={18} />
                 </button>
                 <div>
-                  <p className="text-[20px] font-extrabold text-x-primary">{profile?.user?.username || user?.username}</p>
-                  <p className="text-[13px] text-x-secondary">{profile?.tweets?.length || 0} posts</p>
+                  <p className="m3-section-label">Ваше пространство</p>
+                  <h1 className="top-app-bar__title m3-break-anywhere" style={{ fontSize: 22 }}>
+                    {profile?.user?.username || user?.username}
+                  </h1>
                 </div>
               </div>
-              <div className="flex items-center gap-2 tablet:hidden">
-                <button aria-label="Open search" className="x-icon-button h-10 w-10" onClick={openSearch} type="button">
-                  <Search className="h-5 w-5" />
-                </button>
-                <button aria-label="Create a voice post" className="x-icon-button h-10 w-10" onClick={openComposer} type="button">
-                  <Feather className="h-5 w-5" />
-                </button>
-              </div>
+              <p className="m3-body-small page-header-bar__meta">{profile?.tweets?.length || 0} записей</p>
             </div>
           </header>
 
-          <div className="h-40 border-b border-x-border bg-[radial-gradient(circle_at_top,_rgba(29,155,240,0.45),_transparent_58%),linear-gradient(180deg,_#1d1f23_0%,_#0b0c0d_100%)]" />
+          <div className="main-page-stack">
+            <section className="m3-panel profile-hero">
+              <div className="profile-hero__main">
+                <div className="profile-hero__summary">
+                  {profileAvatarUrl ? (
+                    <img alt={profile?.user?.username || user?.username || "Avatar"} src={profileAvatarUrl} style={{ width: 80, height: 80, borderRadius: "50%", objectFit: "cover", border: "1px solid var(--md-sys-color-outline)" }} />
+                  ) : (
+                    <div className="m3-avatar" style={{ width: 80, height: 80, fontSize: 26 }}>
+                      {(profile?.user?.username || user?.username || "?").slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
 
-          <div className="border-b border-x-border px-4 pb-5 phone:px-5">
-            <div className="flex items-end justify-between gap-4">
-              {profileAvatarUrl ? (
-                <img
-                  alt={profile?.user?.username || user?.username || "Profile avatar"}
-                  className="-mt-16 h-28 w-28 rounded-full border-4 border-black object-cover"
-                  src={profileAvatarUrl}
-                />
-              ) : (
-                <div className="-mt-16 flex h-28 w-28 items-center justify-center rounded-full border-4 border-black bg-[#1d9bf0]/15 text-[34px] font-extrabold text-x-blue">
-                  {profile?.user?.username?.slice(0, 2).toUpperCase() || user?.username?.slice(0, 2).toUpperCase()}
+                  <div className="profile-hero__identity">
+                    <div className="profile-hero__headline">
+                      <p className="m3-title-medium profile-hero__name">
+                        {profile?.user?.username || user?.username}
+                      </p>
+                      {String(profile?.user?.role || user?.role || "").toLowerCase() === "admin" ? <Shield size={16} style={{ color: "var(--md-sys-color-primary)" }} /> : null}
+                    </div>
+                    <p className="m3-body-small profile-hero__handle">
+                      @{(profile?.user?.username || user?.username || "").toLowerCase()}
+                    </p>
+                    <p className="profile-hero__bio">
+                      {profile?.user?.bio || "Добавьте описание в настройках, чтобы слушатели понимали, что вы публикуете."}
+                    </p>
+                  </div>
                 </div>
-              )}
-              <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
-                <button
-                  className="rounded-full border border-x-border px-4 py-2 text-[15px] font-bold text-x-primary transition hover:bg-x-hover"
-                  onClick={() => setIsEditingProfile(true)}
-                  type="button"
-                >
-                  Edit profile
-                </button>
-                <button
-                  className="rounded-full border border-x-border px-4 py-2 text-[15px] font-bold text-x-primary transition hover:bg-x-hover"
-                  onClick={() => navigate("/settings")}
-                  type="button"
-                >
-                  Settings
-                </button>
-                <button
-                  className="rounded-full border border-x-border px-4 py-2 text-[15px] font-bold text-x-primary transition hover:bg-x-hover"
-                  onClick={openComposer}
-                  type="button"
-                >
-                  New voice post
-                </button>
-              </div>
-            </div>
 
-            <div className="mt-4">
-              <div className="flex items-center gap-2">
-                <p className="text-[20px] font-extrabold text-x-primary">{profile?.user?.username || user?.username}</p>
-                {String(profile?.user?.role || user?.role || "").toLowerCase() === "admin" ? <Shield className="h-[18px] w-[18px] text-x-blue" /> : null}
+                <div className="profile-hero__actions">
+                  <Link className="m3-button m3-button-outlined m3-interactive" to="/settings">
+                    Настройки
+                  </Link>
+                </div>
               </div>
-              <p className="mt-1 text-[15px] text-x-secondary">@{(profile?.user?.username || user?.username || "").toLowerCase()}</p>
-              <p className="mt-4 max-w-xl text-[15px] leading-6 text-x-primary">
-                {profile?.user?.bio || "Share quick voice updates and keep your latest posts in one place."}
-              </p>
-              <p className="mt-3 text-[14px] text-x-secondary">
-                Joined {new Date(profile?.user?.created_at || user?.created_at || Date.now()).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-5 text-[15px]">
-                <p>
-                  <span className="font-bold text-x-primary">{profile?.following_count || 0}</span>{" "}
-                  <span className="text-x-secondary">Following</span>
-                </p>
-                <p>
-                  <span className="font-bold text-x-primary">{profile?.follower_count || 0}</span>{" "}
-                  <span className="text-x-secondary">Followers</span>
-                </p>
+
+              <hr className="m3-divider" style={{ margin: "18px 0" }} />
+
+              <div className="profile-stats-grid">
+                <span className="m3-body-small profile-stat-card">
+                  <strong>{profile?.following_count || 0}</strong>
+                  Подписки
+                </span>
+                <span className="m3-body-small profile-stat-card">
+                  <strong>{profile?.follower_count || 0}</strong>
+                  Подписчики
+                </span>
+                <span className="m3-body-small profile-stat-card">
+                  <strong>С нами</strong>
+                  {new Date(profile?.user?.created_at || user?.created_at || Date.now()).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}
+                </span>
               </div>
-            </div>
-          </div>
+            </section>
 
-          {error ? <p className="mx-4 mt-4 rounded-2xl border border-x-red/35 bg-x-red/10 px-4 py-3 text-[14px] text-red-100 phone:mx-5">{error}</p> : null}
+            {error ? <p className="m3-error">{error}</p> : null}
 
-          {loading && !profile ? (
-            <LoadingPosts />
-          ) : profile?.tweets?.length ? (
-            profile.tweets.map((tweet) => (
-              <PostCard
-                currentUser={user}
-                key={tweet.id}
-                onDeleted={(tweetId) => handleCreated({ deletedId: tweetId })}
-                onRefreshRequested={() => void loadProfile({ silent: true })}
-                tweet={tweet}
+            {loading && !profile ? (
+              <LoadingPosts />
+            ) : profile?.tweets?.length ? (
+              <div className="post-list">
+                {profile.tweets.map((tweet) => (
+                  <PostCard
+                    currentUser={user}
+                    key={tweet.id}
+                    onDeleted={(tweetId) => handleCreated({ deletedId: tweetId })}
+                    onRefreshRequested={() => void loadProfile({ silent: true })}
+                    tweet={tweet}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyFeed
+                actions={
+                  <>
+                    <button className="m3-button m3-button-filled m3-fab m3-interactive" onClick={openComposer} type="button">
+                      Начать запись
+                    </button>
+                    <Link className="m3-button m3-button-outlined m3-interactive" to="/settings">
+                      Редактировать профиль
+                    </Link>
+                  </>
+                }
+                description="Запишите первый клип и добавьте короткое описание, чтобы слушатели сразу поняли, что вы публикуете."
+                title="Поделитесь первой голосовой записью"
               />
-            ))
-          ) : (
-            <EmptyFeed description="Your voice posts will appear here after upload and transcription." title="No profile posts yet" />
-          )}
-
-          <EditProfileDialog
-            onClose={() => setIsEditingProfile(false)}
-            onSaved={(updatedProfile) => setProfile(updatedProfile)}
-            open={isEditingProfile}
-            profile={profile}
-          />
+            )}
+          </div>
         </section>
       )}
     </AppShell>
@@ -848,7 +1244,7 @@ function PublicProfileRoute({ search, setSearch }) {
       search={search}
       setSearch={setSearch}
     >
-      {({ openComposer, openSearch }) => <PublicProfilePage onOpenComposer={openComposer} onOpenSearch={openSearch} />}
+      <PublicProfilePage />
     </AppShell>
   );
 }
@@ -868,7 +1264,40 @@ function SettingsRoute({ search, setSearch }) {
   );
 }
 
-function AuthPage({ mode }) {
+function SearchRoute({ search, setSearch }) {
+  const { user } = useAuth();
+
+  return (
+    <AppShell
+      renderComposer={({ close }) => <PostComposer onClose={close} onCreated={() => undefined} user={user} variant="modal" />}
+      rightRailItems={DEFAULT_HIGHLIGHTS}
+      search={search}
+      setSearch={setSearch}
+    >
+      <section>
+        <header className="top-app-bar">
+          <div className="top-app-bar__inner page-header-bar">
+            <div>
+              <p className="m3-section-label">Поиск</p>
+              <h1 className="top-app-bar__title" style={{ fontSize: 22 }}>
+                Записи, люди и темы
+              </h1>
+            </div>
+            <p className="m3-body-small page-header-bar__meta">Фильтруйте ленту без потери контекста</p>
+          </div>
+        </header>
+
+        <div className="main-page-stack">
+          <div className="search-page-panel">
+            <SearchPanel mode="page" search={search} setSearch={setSearch} />
+          </div>
+        </div>
+      </section>
+    </AppShell>
+  );
+}
+
+export function AuthPage({ mode }) {
   const isRegister = mode === "register";
   const { login, register, user } = useAuth();
   const location = useLocation();
@@ -876,9 +1305,11 @@ function AuthPage({ mode }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ username: "", email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
+  const redirectPath = resolvePostAuthPath(location.state?.from);
 
   if (user) {
-    return <Navigate replace to="/" />;
+    return <Navigate replace to={redirectPath} />;
   }
 
   const handleSubmit = async (event) => {
@@ -894,103 +1325,149 @@ function AuthPage({ mode }) {
         await login({ email: form.email, password: form.password });
       }
 
-      navigate(location.state?.from || "/", { replace: true });
+      navigate(redirectPath, { replace: true });
     } catch (caughtError) {
-      setError(caughtError instanceof ApiError ? caughtError.message : "Authentication failed.");
+      setError(caughtError instanceof ApiError ? caughtError.message : "Не удалось выполнить вход.");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-black px-4 py-8">
-      <div className="grid w-full max-w-[1100px] overflow-hidden rounded-[32px] border border-x-border bg-[#090a0c] shadow-lift tablet:grid-cols-[1.08fr_0.92fr]">
-        <section className="relative overflow-hidden border-b border-x-border p-8 tablet:border-b-0 tablet:border-r tablet:p-12">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(29,155,240,0.22),_transparent_34%),radial-gradient(circle_at_bottom_right,_rgba(249,24,128,0.12),_transparent_28%)]" />
-          <div className="relative">
-            <p className="text-[14px] font-bold uppercase tracking-[0.28em] text-x-secondary">Voice Atlas</p>
-            <h1 className="mt-6 max-w-xl text-[44px] font-extrabold leading-[1.02] tracking-tight text-x-primary phone:text-[56px]">
-              Publish voice-first moments, build threads from audio, and let the transcript catch up after.
-            </h1>
-            <p className="mt-5 max-w-xl text-[17px] leading-8 text-x-secondary">
-              Record or upload audio, trim the clip, and turn each post into a living conversation.
-            </p>
+    <div className="auth-shell">
+      <div className="auth-frame">
+        <section className="auth-poster">
+          <div className="auth-poster__content">
+            <div className="auth-poster__brand">
+              <BrandMark size={56} />
+              <div>
+                <p className="m3-section-label">Flutter</p>
+                <p className="m3-title-medium" style={{ marginTop: 4 }}>
+                  Аудио-социальная сеть
+                </p>
+              </div>
+            </div>
 
-            <div className="mt-10 grid gap-3 phone:grid-cols-3">
-              {["Voice posts", "Live feed", "Clean playback"].map((item) => (
-                <div className="rounded-[20px] border border-white/10 bg-white/[0.04] px-4 py-5 text-[15px] font-semibold text-x-primary" key={item}>
-                  {item}
+            <div className="auth-poster__hero">
+              <h1 className="auth-poster__headline">
+                Ваш голос остаётся в центре ленты.
+              </h1>
+
+              <p className="auth-poster__description">
+                Записывайте с микрофона или загружайте файл, обрезайте клип и получайте удобную транскрипцию.
+              </p>
+            </div>
+
+            <div className="auth-waveform auth-poster__waveform">
+              {AUTH_SOUND_BARS.map((height, index) => (
+                <span key={`${index}-${height}`} style={{ height }} />
+              ))}
+            </div>
+
+            <div className="auth-signal-grid">
+              {AUTH_SIGNAL_ITEMS.map((item) => (
+                <div className="m3-card auth-signal-card" key={item.title}>
+                  <p className="m3-title-medium">{item.title}</p>
+                  <p className="m3-body-small" style={{ marginTop: 6 }}>
+                    {item.detail}
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        <section className="p-8 tablet:p-12">
-          <p className="text-[31px] font-extrabold leading-8 text-x-primary">{isRegister ? "Create your account" : "Sign in to Voice Atlas"}</p>
-          <p className="mt-3 text-[15px] leading-6 text-x-secondary">
-            {isRegister ? "Join the feed, publish voice posts, and start building your profile." : "Pick up where you left off."}
+        <section className="auth-panel">
+          <p className="m3-section-label">{isRegister ? "Присоединяйтесь" : "С возвращением"}</p>
+          <h2 className="m3-title-medium" style={{ marginTop: 8, fontSize: 28 }}>
+            {isRegister ? "Создать аккаунт" : "Войти"}
+          </h2>
+          <p className="m3-body-small" style={{ marginTop: 8 }}>
+            {isRegister ? "Начните публиковать и слушать уже через пару секунд." : "Продолжайте там, где остановились."}
           </p>
 
-          <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 16, marginTop: 28 }}>
             {isRegister ? (
-              <label className="block">
-                <span className="mb-2 block text-[15px] font-medium text-x-primary">Username</span>
+              <label style={{ display: "grid", gap: 8 }}>
+                <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                  Имя пользователя
+                </span>
                 <input
-                  className="x-input rounded-2xl"
+                  autoComplete="username"
+                  className="m3-input"
+                  name="username"
                   onChange={(event) => setForm((current) => ({ ...current, username: event.target.value }))}
-                  placeholder="voicepilot"
+                  placeholder="vashe_imya"
                   required
+                  spellCheck={false}
                   type="text"
                   value={form.username}
                 />
               </label>
             ) : null}
 
-            <label className="block">
-              <span className="mb-2 block text-[15px] font-medium text-x-primary">Email</span>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                Email
+              </span>
               <input
-                className="x-input rounded-2xl"
+                autoComplete="email"
+                className="m3-input"
+                name="email"
                 onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
-                placeholder="hello@voice-tweet.com"
+                placeholder="hello@example.com"
                 required
+                spellCheck={false}
                 type="email"
                 value={form.email}
               />
             </label>
 
-            <label className="block">
-              <span className="mb-2 block text-[15px] font-medium text-x-primary">Password</span>
-              <input
-                className="x-input rounded-2xl"
-                onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
-                placeholder="At least 8 characters"
-                required
-                type="password"
-                value={form.password}
-              />
+            <label style={{ display: "grid", gap: 8 }}>
+              <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                Пароль
+              </span>
+              <div className="password-field">
+                <input
+                  autoComplete={isRegister ? "new-password" : "current-password"}
+                  className="m3-input password-field__input"
+                  name="password"
+                  onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
+                  placeholder="Минимум 8 символов"
+                  required
+                  type={showPassword ? "text" : "password"}
+                  value={form.password}
+                />
+                <button
+                  aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                  aria-pressed={showPassword}
+                  className="password-field__toggle m3-interactive m3-state-neutral"
+                  onClick={() => setShowPassword((current) => !current)}
+                  type="button"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </label>
 
-            {error ? <p className="rounded-2xl border border-x-red/35 bg-x-red/10 px-4 py-3 text-[14px] text-red-100">{error}</p> : null}
+            {error ? <p className="m3-error">{error}</p> : null}
 
-            <button
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[16px] font-bold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy}
-              type="submit"
-            >
-              {busy ? <LoaderCircle className="h-[18px] w-[18px] animate-spin" /> : null}
-              {busy ? "Working..." : isRegister ? "Create account" : "Sign in"}
+            <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={busy} style={{ width: "100%", justifyContent: "center" }} type="submit">
+              {busy ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : null}
+              {busy ? "Подождите…" : isRegister ? "Создать аккаунт" : "Войти"}
             </button>
           </form>
 
-          <p className="mt-6 text-[15px] text-x-secondary">
-            {isRegister ? "Already have an account?" : "Need an account?"}{" "}
-            <Link className="font-bold text-white" to={isRegister ? "/login" : "/register"}>
-              {isRegister ? "Sign in" : "Create one"}
+          <p className="m3-body-small" style={{ marginTop: 22 }}>
+            {isRegister ? "Уже есть аккаунт? " : "Нет аккаунта? "}
+            <Link className="m3-link" to={isRegister ? "/login" : "/register"}>
+              {isRegister ? "Войти" : "Создать"}
             </Link>
           </p>
         </section>
       </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -1010,8 +1487,6 @@ export default function App() {
 
   const setSearch = useCallback(
     (nextSearch) => {
-      setSearchState(nextSearch);
-
       const params = new URLSearchParams(location.search);
       if (nextSearch.length) {
         params.set("q", nextSearch);
@@ -1019,13 +1494,16 @@ export default function App() {
         params.delete("q");
       }
 
-      navigate(
-        {
-          pathname: location.pathname,
-          search: params.toString() ? `?${params.toString()}` : "",
-        },
-        { replace: true },
-      );
+      startTransition(() => {
+        setSearchState(nextSearch);
+        navigate(
+          {
+            pathname: location.pathname,
+            search: params.toString() ? `?${params.toString()}` : "",
+          },
+          { replace: true },
+        );
+      });
     },
     [location.pathname, location.search, navigate],
   );
@@ -1037,6 +1515,7 @@ export default function App() {
       <Route element={Routed(<AuthPage mode="login" />)} path="/login" />
       <Route element={Routed(<AuthPage mode="register" />)} path="/register" />
       <Route element={Routed(<HomeRoute search={search} setSearch={setSearch} />)} path="/" />
+      <Route element={Routed(<SearchRoute search={search} setSearch={setSearch} />)} path="/search" />
       <Route element={Routed(<ThreadRoute search={search} setSearch={setSearch} />)} path="/post/:postId" />
       <Route
         element={Routed(

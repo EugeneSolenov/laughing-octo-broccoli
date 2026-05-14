@@ -428,7 +428,7 @@ def unfollow_user(user_id: int, current_user: AuthenticatedUser, db: Session = D
 
 
 @router.post("/users/{user_id}/block", response_model=UserRelationResponse)
-def block_user(user_id: int, current_user: AuthenticatedUser, db: Session = Depends(get_db)) -> UserRelationResponse:
+def block_user(user_id: int, current_user: AdminUser, db: Session = Depends(get_db)) -> UserRelationResponse:
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="You cannot block yourself.")
     target_user = db.get(User, user_id)

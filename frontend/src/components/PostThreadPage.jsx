@@ -6,7 +6,6 @@ import { ApiError, apiFetch, createEventSource } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import PostCard from "./PostCard.jsx";
-import PostComposer from "./PostComposer.jsx";
 
 const LIVE_THREAD_EVENTS = new Set([
   "tweet.created",
@@ -23,9 +22,9 @@ function buildThreadHighlights(detail) {
   }
 
   return items.slice(0, 3).map((tweet, index) => ({
-    title: tweet.caption || tweet.transcription_text?.split("\n")[0] || `${tweet.user.username} posted audio`,
-    meta: index === 0 ? "Thread anchor" : "Voice reply",
-    count: `${tweet.reply_count || 0} replies`,
+    title: tweet.caption || tweet.transcription_text?.split("\n")[0] || `${tweet.user.username} опубликовал запись`,
+    meta: index === 0 ? "Главная запись" : "Ответ",
+    count: `${tweet.reply_count || 0} ответов`,
   }));
 }
 
@@ -40,6 +39,8 @@ export default function PostThreadPage() {
   const showToast = useToast();
   const [detail, setDetail] = useState(null);
   const [editingBusy, setEditingBusy] = useState(false);
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [commentText, setCommentText] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [transcriptionDraft, setTranscriptionDraft] = useState("");
@@ -54,7 +55,7 @@ export default function PostThreadPage() {
         setDetail(data);
         setError("");
       } catch (caughtError) {
-        setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load the thread.");
+        setError(caughtError instanceof ApiError ? caughtError.message : "Не удалось загрузить обсуждение.");
       } finally {
         if (!silent) {
           setLoading(false);
@@ -123,9 +124,9 @@ export default function PostThreadPage() {
         body: JSON.stringify({ transcription_text: transcriptionDraft.trim() || null }),
       });
       setDetail((current) => (current ? { ...current, tweet: updatedTweet } : current));
-      showToast("Transcript updated.", "success");
+      showToast("Транскрипция обновлена.", "success");
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to update the transcript.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось обновить транскрипцию.", "info");
     } finally {
       setEditingBusy(false);
     }
@@ -138,155 +139,199 @@ export default function PostThreadPage() {
 
     try {
       setEditingBusy(true);
-      const updatedTweet = await apiFetch(`/tweets/${detail.tweet.id}/rerun-transcription`, {
-        method: "POST",
-      });
+      const updatedTweet = await apiFetch(`/tweets/${detail.tweet.id}/rerun-transcription`, { method: "POST" });
       setDetail((current) => (current ? { ...current, tweet: updatedTweet } : current));
-      showToast("Whisper re-run started.", "success");
+      showToast("Повторная расшифровка запущена.", "success");
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to rerun transcription.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось повторно запустить транскрипцию.", "info");
     } finally {
       setEditingBusy(false);
     }
   };
 
-  if (loading && !detail) {
-    return (
-      <section>
-        <header className="sticky top-0 z-20 border-b border-x-border bg-black/80 backdrop-blur-md">
-          <div className="flex items-center gap-4 px-4 py-3 phone:px-5">
-            <button aria-label="Go back" className="x-icon-button h-9 w-9" onClick={() => navigate(-1)} type="button">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <p className="text-[20px] font-extrabold text-x-primary">Thread</p>
-          </div>
-        </header>
-        <div className="px-4 py-8 phone:px-5">
-          <div className="rounded-[24px] border border-x-border bg-[#111214] p-6 text-[15px] text-x-secondary">Loading thread...</div>
-        </div>
-      </section>
-    );
-  }
+  const submitComment = async (event) => {
+    event.preventDefault();
+
+    const normalizedComment = commentText.trim();
+    if (!detail?.tweet || detail.tweet.parent_tweet_id || !normalizedComment) {
+      return;
+    }
+
+    try {
+      setCommentBusy(true);
+      const formData = new FormData();
+      formData.append("caption", normalizedComment);
+      await apiFetch(`/tweets/${detail.tweet.id}/reply`, {
+        method: "POST",
+        body: formData,
+      });
+      setCommentText("");
+      await loadThread({ silent: true });
+      showToast("Комментарий отправлен.", "success");
+    } catch (caughtError) {
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось отправить комментарий.", "info");
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const isReplyThread = Boolean(detail?.tweet?.parent_tweet_id);
+  const canCommentOnThread = Boolean(user && detail?.tweet && !isReplyThread);
+  const shouldShowLoginCommentPrompt = Boolean(!user && detail?.tweet && !isReplyThread);
+  const isCommentDisabled = commentBusy || !commentText.trim().length;
 
   return (
     <section>
-      <header className="sticky top-0 z-20 border-b border-x-border bg-black/80 backdrop-blur-md">
-        <div className="flex items-center gap-4 px-4 py-3 phone:px-5">
-          <button aria-label="Go back" className="x-icon-button h-9 w-9" onClick={() => navigate(-1)} type="button">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div>
-            <p className="text-[20px] font-extrabold text-x-primary">Thread</p>
-            <p className="text-[13px] text-x-secondary">Permalink, replies, and transcript controls.</p>
+      <header className="top-app-bar">
+        <div className="top-app-bar__inner">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button aria-label="Назад" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={() => navigate(-1)} type="button">
+              <ArrowLeft size={18} />
+            </button>
+            <div>
+              <p className="m3-section-label">Обсуждение</p>
+              <h1 className="top-app-bar__title" style={{ fontSize: 22 }}>
+                Ветка
+              </h1>
+            </div>
           </div>
+          <p className="m3-body-small">{detail?.replies?.length || 0} ответов</p>
         </div>
       </header>
 
-      {error ? <p className="mx-4 mt-4 rounded-2xl border border-x-red/35 bg-x-red/10 px-4 py-3 text-[14px] text-red-100 phone:mx-5">{error}</p> : null}
+      <div className="main-page-stack">
+        {error ? <p className="m3-error">{error}</p> : null}
 
-      {detail?.parent ? (
-        <div className="border-b border-x-border bg-white/[0.015]">
-          <div className="px-4 py-3 phone:px-5">
-            <p className="text-[13px] font-medium text-x-secondary">
-              In reply to{" "}
-              <Link className="text-x-blue" to={`/profile/${detail.parent.user.id}`}>
+        {loading && !detail ? (
+          <div className="m3-card" style={{ padding: 18 }}>
+            <div className="m3-skeleton" style={{ height: 110 }} />
+          </div>
+        ) : null}
+
+        {detail?.parent ? (
+          <section className="m3-panel" style={{ padding: 18 }}>
+            <p className="m3-body-small" style={{ marginBottom: 12 }}>
+              Ответ для{" "}
+              <Link className="m3-link" to={`/profile/${detail.parent.user.id}`}>
                 @{detail.parent.user.username.toLowerCase()}
               </Link>
             </p>
-          </div>
-          <PostCard currentUser={user} onRefreshRequested={() => void loadThread({ silent: true })} tweet={detail.parent} />
-        </div>
-      ) : null}
+            <PostCard currentUser={user} onRefreshRequested={() => void loadThread({ silent: true })} tweet={detail.parent} />
+          </section>
+        ) : null}
 
-      {detail?.tweet ? <PostCard currentUser={user} onRefreshRequested={() => void loadThread({ silent: true })} tweet={detail.tweet} /> : null}
+        {detail?.tweet ? <PostCard currentUser={user} onRefreshRequested={() => void loadThread({ silent: true })} tweet={detail.tweet} /> : null}
 
-      {canEditTranscript ? (
-        <section className="border-b border-x-border px-4 py-5 phone:px-5">
-          <div className="rounded-[24px] border border-white/10 bg-[#0f1115] p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+        {canEditTranscript ? (
+          <section className="m3-panel" style={{ padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
               <div>
-                <p className="text-[20px] font-extrabold text-x-primary">Transcript studio</p>
-                <p className="mt-1 text-[14px] leading-6 text-x-secondary">
-                  Edit the transcript manually when Whisper misses context, or rerun it from the source audio.
+                <p className="m3-section-label">Инструменты транскрипции</p>
+                <h2 className="m3-title-medium" style={{ marginTop: 4, fontSize: 20 }}>
+                  Уточнить текст от ИИ
+                </h2>
+                <p className="m3-body-small" style={{ marginTop: 6 }}>
+                  Исправьте формулировки вручную или запустите распознавание заново на исходном аудио.
                 </p>
               </div>
-              <span className="x-pill">
-                <Sparkles className="h-3.5 w-3.5" />
-                Voice-first editing
+              <span className="m3-chip m3-chip-filled">
+                <Sparkles size={12} />
+                ИИ
               </span>
             </div>
 
-            <label className="mt-4 block">
-              <span className="mb-2 block text-[14px] font-semibold text-x-primary">Transcript text</span>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                Транскрипция
+              </span>
               <textarea
-                className="x-input min-h-[180px] rounded-[22px]"
+                className="m3-textarea"
                 maxLength={5000}
                 onChange={(event) => setTranscriptionDraft(event.target.value)}
-                placeholder="Refine the transcript, clean up filler words, or add missing context."
+                placeholder="Исправьте текст, уберите слова-паразиты или добавьте недостающий контекст."
+                rows={6}
                 value={transcriptionDraft}
               />
             </label>
 
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
-              <button
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-2.5 text-[15px] font-bold text-x-primary transition hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={editingBusy}
-                onClick={() => void rerunTranscription()}
-                type="button"
-              >
-                <RotateCcw className="h-[18px] w-[18px]" />
-                Re-run transcription
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+              <button className="m3-button m3-button-outlined m3-interactive" disabled={editingBusy} onClick={() => void rerunTranscription()} type="button">
+                <RotateCcw size={14} />
+                Запустить ещё раз
               </button>
-              <button
-                className="inline-flex items-center gap-2 rounded-full bg-x-blue px-5 py-2.5 text-[15px] font-bold text-white transition hover:bg-[#1a8cd8] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={editingBusy}
-                onClick={() => void saveTranscript()}
-                type="button"
-              >
-                {editingBusy ? <LoaderCircle className="h-[18px] w-[18px] animate-spin" /> : null}
-                Save transcript
+              <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={editingBusy} onClick={() => void saveTranscript()} type="button">
+                {editingBusy ? <LoaderCircle size={14} style={{ animation: "spin 1s linear infinite" }} /> : null}
+                Сохранить
               </button>
             </div>
-          </div>
-        </section>
-      ) : null}
+          </section>
+        ) : null}
 
-      <section className="border-b border-x-border px-4 py-5 phone:px-5">
-        {user ? (
-          <PostComposer onCreated={() => void loadThread({ silent: true })} replyToTweetId={detail?.tweet?.id || null} user={user} />
+        {canCommentOnThread ? (
+          <section className="m3-panel" style={{ padding: 20 }}>
+            <form className="thread-comment-form" onSubmit={submitComment}>
+              <div className="thread-comment-form__header">
+                <div>
+                  <p className="m3-section-label">Комментарий</p>
+                  <h2 className="m3-title-medium" style={{ marginTop: 4, fontSize: 20 }}>
+                    Ответить текстом
+                  </h2>
+                </div>
+                <span className="m3-body-small">{commentText.length}/500</span>
+              </div>
+              <textarea
+                className="m3-textarea thread-comment-form__textarea"
+                maxLength={500}
+                onChange={(event) => setCommentText(event.target.value)}
+                placeholder="Написать комментарий..."
+                rows={4}
+                value={commentText}
+              />
+              <div className="thread-comment-form__actions">
+                <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={isCommentDisabled} type="submit">
+                  {commentBusy ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : null}
+                  {commentBusy ? "Отправка\u2026" : "Отправить"}
+                </button>
+              </div>
+            </form>
+          </section>
+        ) : shouldShowLoginCommentPrompt ? (
+          <section className="m3-panel" style={{ padding: 20 }}>
+            <div className="m3-card m3-empty">
+              <p className="m3-title-medium">Только авторизованные пользователи могут комментировать</p>
+              <p className="m3-body-small" style={{ marginTop: 6 }}>
+                Войдите, чтобы оставить текстовый комментарий в этой ветке.
+              </p>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+                <Link className="m3-button m3-button-filled m3-fab m3-interactive" to="/login">
+                  Войти
+                </Link>
+                <Link className="m3-button m3-button-outlined m3-interactive" to="/register">
+                  Создать аккаунт
+                </Link>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {detail?.replies?.length ? (
+          <div className="post-list">
+            {detail.replies.map((reply) => (
+              <PostCard currentUser={user} key={reply.id} onRefreshRequested={() => void loadThread({ silent: true })} tweet={reply} />
+            ))}
+          </div>
         ) : (
-          <div className="rounded-[24px] border border-x-border bg-[#111214] p-6">
-            <p className="text-[24px] font-extrabold text-x-primary">Reply with your voice</p>
-            <p className="mt-2 text-[15px] leading-6 text-x-secondary">Sign in to leave an audio reply and keep the thread moving.</p>
-            <div className="mt-4 flex gap-3">
-              <Link className="rounded-full bg-white px-5 py-2.5 text-[15px] font-bold text-black transition hover:bg-white/90" to="/login">
-                Sign in
-              </Link>
-              <Link className="rounded-full border border-x-border px-5 py-2.5 text-[15px] font-bold text-x-primary transition hover:bg-x-hover" to="/register">
-                Create account
-              </Link>
+          !loading &&
+          !isReplyThread && (
+            <div className="m3-card m3-empty">
+              <p className="m3-title-medium">Ответов пока нет</p>
+              <p className="m3-body-small" style={{ marginTop: 6 }}>
+                Оставьте первый комментарий к этой записи.
+              </p>
             </div>
-          </div>
+          )
         )}
-      </section>
-
-      {detail?.replies?.length ? (
-        detail.replies.map((reply) => (
-          <PostCard
-            currentUser={user}
-            key={reply.id}
-            onRefreshRequested={() => void loadThread({ silent: true })}
-            tweet={reply}
-          />
-        ))
-      ) : (
-        <div className="px-4 py-10 phone:px-5">
-          <div className="rounded-[24px] border border-x-border bg-[#111214] p-6">
-            <p className="text-[24px] font-extrabold text-x-primary">No replies yet</p>
-            <p className="mt-2 text-[15px] leading-6 text-x-secondary">This permalink is live. The first audio reply will appear right here.</p>
-          </div>
-        </div>
-      )}
+      </div>
     </section>
   );
 }

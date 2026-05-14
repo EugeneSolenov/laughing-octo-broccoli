@@ -182,6 +182,13 @@ def _load_current_user(raw_token: str | None, expected_type: str, db: Session) -
     user = db.get(User, token_payload.sub)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found.")
+    if expected_type == "access":
+        if not token_payload.sid:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session not found.")
+
+        session = db.get(AuthSession, token_payload.sid)
+        if session is None or session.user_id != user.id or session.revoked_at is not None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session not found.")
     if user.is_banned:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is banned.")
     return user

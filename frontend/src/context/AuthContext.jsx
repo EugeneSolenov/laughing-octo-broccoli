@@ -1,4 +1,4 @@
-import { createContext, startTransition, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 import { ApiError, apiFetch } from "../api/client";
 
@@ -9,9 +9,11 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const updateUser = (nextUser) => {
-    startTransition(() => {
-      setUser(nextUser);
-    });
+    setUser(nextUser);
+  };
+
+  const clearSession = () => {
+    updateUser(null);
   };
 
   const refreshSession = async () => {
@@ -20,12 +22,7 @@ export function AuthProvider({ children }) {
       updateUser(session.user);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
-        try {
-          const refreshed = await apiFetch("/auth/refresh", { method: "POST" });
-          updateUser(refreshed.user);
-        } catch {
-          updateUser(null);
-        }
+        updateUser(null);
       } else {
         updateUser(null);
       }
@@ -67,7 +64,12 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     await apiFetch("/auth/logout", { method: "POST" });
-    updateUser(null);
+    clearSession();
+  };
+
+  const logoutEverywhere = async () => {
+    await apiFetch("/auth/logout-all", { method: "POST" });
+    clearSession();
   };
 
   const refreshProfile = async () => {
@@ -90,9 +92,11 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider
       value={{
         user,
+        clearSession,
         loading,
         login,
         logout,
+        logoutEverywhere,
         refreshProfile,
         refreshSession,
         register,

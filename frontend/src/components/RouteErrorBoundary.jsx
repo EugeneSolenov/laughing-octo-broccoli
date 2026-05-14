@@ -25,19 +25,18 @@ export default class RouteErrorBoundary extends Component {
   render() {
     if (this.state.error) {
       return (
-        <div className="flex min-h-screen items-center justify-center bg-black px-4">
-          <div className="w-full max-w-lg rounded-[24px] border border-x-border bg-[#111214] p-8 text-center">
-            <p className="text-[28px] font-extrabold text-x-primary">Something went wrong</p>
-            <p className="mt-3 text-[15px] leading-6 text-x-secondary">
-              This screen ran into an unexpected problem. Reload to try again.
+        <div className="auth-shell">
+          <div className="m3-panel" style={{ width: "min(520px, 100%)", padding: 28, textAlign: "center" }}>
+            <p className="m3-section-label">Неожиданная ошибка</p>
+            <p className="m3-title-medium" data-display="true" style={{ marginTop: 8, fontSize: 28 }}>
+              Что-то пошло не так
             </p>
-            <button
-              className="mt-6 inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-[15px] font-bold text-black transition hover:bg-white/90"
-              onClick={this.handleReload}
-              type="button"
-            >
-              <RefreshCcw className="h-4 w-4" />
-              Reload
+            <p className="m3-body-small" style={{ marginTop: 10 }}>
+              На этом экране произошла ошибка. Перезагрузите страницу и попробуйте снова.
+            </p>
+            <button className="m3-button m3-button-filled m3-fab m3-interactive" onClick={this.handleReload} style={{ marginTop: 20 }} type="button">
+              <RefreshCcw size={16} />
+              Перезагрузить
             </button>
           </div>
         </div>

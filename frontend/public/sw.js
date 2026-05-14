@@ -1,5 +1,5 @@
-const CACHE_NAME = "voice-x-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
+const CACHE_NAME = "flutter-v5";
+const APP_SHELL = ["/", "/manifest.webmanifest", "/bird_logo_square_no_eye.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -27,21 +27,46 @@ self.addEventListener("fetch", (event) => {
   const isApiRequest = requestUrl.pathname.startsWith("/api/");
   const isUploadRequest = requestUrl.pathname.startsWith("/uploads/");
 
+  if (isApiRequest || isUploadRequest) {
+    event.respondWith(fetch(event.request).catch(() => Response.error()));
+    return;
+  }
+
+  if (isNavigation) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(
+          () =>
+            caches.match("/").then(
+              (cached) =>
+                cached ??
+                new Response("Offline", {
+                  status: 503,
+                  headers: { "Content-Type": "text/plain" },
+                }),
+            ),
+        ),
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-
-      return fetch(event.request).catch(() => {
-        if (isNavigation) {
-          return caches.match("/");
+      const networkFetch = fetch(event.request).then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          void caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
-        if (isApiRequest || isUploadRequest) {
-          return Response.error();
-        }
-        return caches.match(event.request);
+        return response;
       });
+      return cached ?? networkFetch;
     }),
   );
 });

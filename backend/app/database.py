@@ -4,7 +4,7 @@ from collections.abc import Generator
 
 import logging
 from sqlalchemy import create_engine
-from sqlalchemy import inspect, or_, select
+from sqlalchemy import inspect, select
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.exc import OperationalError
 
@@ -45,28 +45,42 @@ def init_db() -> None:
 
     db = SessionLocal()
     try:
+        normalized_admin_email = settings.admin_email.lower()
         admin = db.scalar(
             select(User).where(
-                or_(
-                    User.email == settings.admin_email.lower(),
-                    User.username == settings.admin_username,
-                )
+                User.email == normalized_admin_email,
+                User.username == settings.admin_username,
             )
         )
-        if admin is None:
+        if admin is not None:
+            if admin.role != UserRole.admin:
+                raise RuntimeError(
+                    "Admin bootstrap conflict: the configured admin email and username belong to a non-admin user."
+                )
+            admin.is_banned = False
+            db.add(admin)
+        else:
+            email_owner = db.scalar(select(User).where(User.email == normalized_admin_email))
+            username_owner = db.scalar(select(User).where(User.username == settings.admin_username))
+            conflicts = []
+            if email_owner is not None:
+                conflicts.append("email")
+            if username_owner is not None:
+                conflicts.append("username")
+            if conflicts:
+                conflict_list = ", ".join(conflicts)
+                raise RuntimeError(
+                    f"Admin bootstrap conflict: configured admin {conflict_list} is already used by another account."
+                )
+
             admin = User(
                 username=settings.admin_username,
-                email=settings.admin_email.lower(),
+                email=normalized_admin_email,
                 hashed_password=hash_password(settings.admin_password),
                 role=UserRole.admin,
                 is_banned=False,
             )
             db.add(admin)
-        else:
-            admin.username = settings.admin_username
-            admin.email = settings.admin_email.lower()
-            admin.role = UserRole.admin
-            admin.is_banned = False
 
         db.commit()
         logger.info("Admin bootstrap completed", extra={"admin_email": settings.admin_email})

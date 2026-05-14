@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Notification, NotificationType, follows, tweet_likes, tweet_reposts, user_blocks, user_mutes, VoiceTweet

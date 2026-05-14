@@ -5,6 +5,10 @@ import { vi } from "vitest";
 import ProtectedRoute from "./ProtectedRoute.jsx";
 
 const useAuthMock = vi.fn();
+const routerFuture = {
+  v7_relativeSplatPath: true,
+  v7_startTransition: true,
+};
 
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => useAuthMock(),
@@ -15,7 +19,7 @@ describe("ProtectedRoute", () => {
     useAuthMock.mockReturnValue({ loading: false, user: null });
 
     render(
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter future={routerFuture} initialEntries={["/settings"]}>
         <Routes>
           <Route
             element={
@@ -37,7 +41,7 @@ describe("ProtectedRoute", () => {
     useAuthMock.mockReturnValue({ loading: false, user: { id: 1, role: "user" } });
 
     render(
-      <MemoryRouter initialEntries={["/settings"]}>
+      <MemoryRouter future={routerFuture} initialEntries={["/settings"]}>
         <Routes>
           <Route
             element={

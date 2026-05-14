@@ -1,13 +1,14 @@
-import { ArrowLeft, KeyRound, LoaderCircle, LogOut, ShieldCheck, Smartphone, UserRoundCog } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ArrowLeft, Eye, EyeOff, KeyRound, LoaderCircle, LogOut, ShieldCheck, Smartphone, UserRoundCog } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError, apiFetch } from "../api/client";
+import { ApiError, apiFetch, getMediaUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
+import ConfirmDialog from "./ConfirmDialog.jsx";
 
 function formatSessionDate(value) {
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("ru-RU", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -15,20 +16,58 @@ function formatSessionDate(value) {
   }).format(new Date(value));
 }
 
+function SectionCard({ children, description, icon: Icon, title }) {
+  return (
+    <section className="m3-panel settings-section-card">
+      <div className="settings-section-card__header">
+        <div className="settings-section-card__icon">
+          <Icon size={18} />
+        </div>
+        <div className="settings-section-card__copy">
+          <h2 className="m3-title-medium" style={{ fontSize: 20 }}>
+            {title}
+          </h2>
+          {description ? (
+            <p className="m3-body-small" style={{ marginTop: 4 }}>
+              {description}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <div className="settings-section-card__body">{children}</div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
   const navigate = useNavigate();
   const showToast = useToast();
-  const { user } = useAuth();
+  const { clearSession, logoutEverywhere, updateProfile, user } = useAuth();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [profileForm, setProfileForm] = useState({
+    avatar_url: "",
+    bio: "",
+  });
+  const [savedProfileForm, setSavedProfileForm] = useState({
+    avatar_url: "",
+    bio: "",
+  });
   const [passwordForm, setPasswordForm] = useState({
     current_password: "",
     new_password: "",
   });
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [preferences, setPreferences] = useState({
     discoverable: true,
     notifications_enabled: true,
   });
+  const [savedPreferences, setSavedPreferences] = useState({
+    discoverable: true,
+    notifications_enabled: true,
+  });
+  const [confirmRequest, setConfirmRequest] = useState(null);
   const [sessions, setSessions] = useState([]);
 
   const loadSettings = useCallback(async () => {
@@ -42,15 +81,59 @@ export default function SettingsPage() {
         discoverable: Boolean(preferencesResult.discoverable),
         notifications_enabled: Boolean(preferencesResult.notifications_enabled),
       });
+      setSavedPreferences({
+        discoverable: Boolean(preferencesResult.discoverable),
+        notifications_enabled: Boolean(preferencesResult.notifications_enabled),
+      });
       setSessions(sessionsResult.items || []);
     } catch (caughtError) {
-      setError(caughtError instanceof ApiError ? caughtError.message : "Unable to load settings.");
+      setError(caughtError instanceof ApiError ? caughtError.message : "Не удалось загрузить настройки.");
     }
   }, []);
 
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  useEffect(() => {
+    const nextProfileForm = {
+      avatar_url: user?.avatar_url || "",
+      bio: user?.bio || "",
+    };
+    setProfileForm(nextProfileForm);
+    setSavedProfileForm(nextProfileForm);
+  }, [user?.avatar_url, user?.bio]);
+
+  const isProfileDirty = useMemo(
+    () => profileForm.avatar_url.trim() !== savedProfileForm.avatar_url.trim() || profileForm.bio.trim() !== savedProfileForm.bio.trim(),
+    [profileForm.avatar_url, profileForm.bio, savedProfileForm.avatar_url, savedProfileForm.bio],
+  );
+  const isPreferencesDirty = useMemo(
+    () =>
+      preferences.discoverable !== savedPreferences.discoverable ||
+      preferences.notifications_enabled !== savedPreferences.notifications_enabled,
+    [preferences.discoverable, preferences.notifications_enabled, savedPreferences.discoverable, savedPreferences.notifications_enabled],
+  );
+
+  const saveProfile = async () => {
+    try {
+      setBusy("profile");
+      const nextProfileForm = {
+        avatar_url: profileForm.avatar_url.trim() || null,
+        bio: profileForm.bio.trim() || null,
+      };
+      await updateProfile(nextProfileForm);
+      setSavedProfileForm({
+        avatar_url: nextProfileForm.avatar_url || "",
+        bio: nextProfileForm.bio || "",
+      });
+      showToast("Профиль обновлён.", "success");
+    } catch (caughtError) {
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось сохранить профиль.", "info");
+    } finally {
+      setBusy("");
+    }
+  };
 
   const savePreferences = async () => {
     try {
@@ -60,9 +143,10 @@ export default function SettingsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(preferences),
       });
-      showToast("Preferences saved.", "success");
+      setSavedPreferences(preferences);
+      showToast("Настройки сохранены.", "success");
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to save preferences.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось сохранить настройки.", "info");
     } finally {
       setBusy("");
     }
@@ -79,9 +163,11 @@ export default function SettingsPage() {
         body: JSON.stringify(passwordForm),
       });
       setPasswordForm({ current_password: "", new_password: "" });
-      showToast("Password updated.", "success");
+      clearSession();
+      showToast("Пароль обновлён. Войдите снова с новым паролем.", "success");
+      navigate("/login", { replace: true });
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to update password.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось обновить пароль.", "info");
     } finally {
       setBusy("");
     }
@@ -92,9 +178,10 @@ export default function SettingsPage() {
       setBusy(`session:${sessionId}`);
       await apiFetch(`/auth/sessions/${sessionId}`, { method: "DELETE" });
       setSessions((current) => current.filter((item) => item.id !== sessionId));
-      showToast("Session revoked.", "success");
+      setConfirmRequest(null);
+      showToast("Сессия завершена.", "success");
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to revoke session.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось завершить сессию.", "info");
     } finally {
       setBusy("");
     }
@@ -103,184 +190,273 @@ export default function SettingsPage() {
   const logoutAll = async () => {
     try {
       setBusy("logout-all");
-      await apiFetch("/auth/logout-all", { method: "POST" });
+      await logoutEverywhere();
+      setConfirmRequest(null);
       navigate("/login", { replace: true });
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to log out all devices.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось выйти на всех устройствах.", "info");
     } finally {
       setBusy("");
     }
   };
 
+  const profilePreviewUrl = profileForm.avatar_url.trim() ? getMediaUrl(profileForm.avatar_url.trim()) : "";
+  const profileRole = String(user?.role || "user");
+
   return (
     <section>
-      <header className="sticky top-0 z-20 border-b border-x-border bg-black/80 backdrop-blur-md">
-        <div className="flex items-center gap-4 px-4 py-3 phone:px-5">
-          <button aria-label="Go back" className="x-icon-button h-9 w-9" onClick={() => navigate(-1)} type="button">
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div>
-            <p className="text-[20px] font-extrabold text-x-primary">Settings</p>
-            <p className="text-[13px] text-x-secondary">Password, sessions, notifications, and privacy controls.</p>
+      <header className="top-app-bar">
+        <div className="top-app-bar__inner page-header-bar">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <button aria-label="Go back" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={() => navigate(-1)} type="button">
+              <ArrowLeft size={18} />
+            </button>
+            <div>
+              <p className="m3-section-label">Аккаунт</p>
+              <h1 className="top-app-bar__title" style={{ fontSize: 22 }}>
+                Настройки
+              </h1>
+            </div>
           </div>
+          <p className="m3-body-small page-header-bar__meta">Профиль, приватность и сессии</p>
         </div>
       </header>
 
-      <div className="space-y-5 px-4 py-5 phone:px-5">
-        {error ? <p className="rounded-2xl border border-x-red/35 bg-x-red/10 px-4 py-3 text-[14px] text-red-100">{error}</p> : null}
+      <div className="main-page-stack">
+        {error ? <p className="m3-error">{error}</p> : null}
 
-        <section className="rounded-[24px] border border-x-border bg-[#111214] p-5">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-x-blue" />
-            <h2 className="text-[22px] font-extrabold text-x-primary">Privacy</h2>
-          </div>
-          <div className="mt-4 space-y-4">
-            <label className="flex items-start justify-between gap-4 rounded-[20px] border border-white/10 bg-black/30 px-4 py-4">
-              <div>
-                <p className="text-[15px] font-bold text-x-primary">Appear in people search</p>
-                <p className="mt-1 text-[14px] leading-6 text-x-secondary">Let new listeners discover your profile from search and suggestions.</p>
-              </div>
-              <input
-                checked={preferences.discoverable}
-                className="mt-1 h-5 w-5 accent-[#1d9bf0]"
-                onChange={(event) => setPreferences((current) => ({ ...current, discoverable: event.target.checked }))}
-                type="checkbox"
+        <SectionCard description="Обновите профиль, который слушатели видят перед подпиской." icon={UserRoundCog} title="Профиль">
+          <div className="m3-card settings-profile-card">
+            {profilePreviewUrl ? (
+              <img
+                alt={user?.username || "Аватар профиля"}
+                loading="lazy"
+                src={profilePreviewUrl}
+                style={{ width: 72, height: 72, borderRadius: "50%", objectFit: "cover", border: "1px solid var(--md-sys-color-outline)" }}
               />
-            </label>
+            ) : (
+              <div className="m3-avatar" style={{ width: 72, height: 72, fontSize: 22 }}>
+                {(user?.username || "VA").slice(0, 2).toUpperCase()}
+              </div>
+            )}
 
-            <label className="flex items-start justify-between gap-4 rounded-[20px] border border-white/10 bg-black/30 px-4 py-4">
-              <div>
-                <p className="text-[15px] font-bold text-x-primary">In-app notifications</p>
-                <p className="mt-1 text-[14px] leading-6 text-x-secondary">Keep mentions, replies, follows, and audio updates flowing into your notification sheet.</p>
-              </div>
-              <input
-                checked={preferences.notifications_enabled}
-                className="mt-1 h-5 w-5 accent-[#1d9bf0]"
-                onChange={(event) => setPreferences((current) => ({ ...current, notifications_enabled: event.target.checked }))}
-                type="checkbox"
-              />
-            </label>
+            <div className="settings-profile-card__identity">
+              <p className="m3-title-medium settings-profile-card__name">
+                {user?.username}
+              </p>
+              <p className="m3-body-small settings-profile-card__handle">
+                @{(user?.username || "").toLowerCase()} {"\u00b7"} {profileRole}
+              </p>
+              <p className="settings-profile-card__bio">
+                {profileForm.bio.trim() || "Добавьте короткое описание, чтобы слушатели понимали, какие записи вы публикуете."}
+              </p>
+            </div>
           </div>
 
-          <div className="mt-4 flex justify-end">
-            <button
-              className="inline-flex items-center gap-2 rounded-full bg-x-blue px-5 py-2.5 text-[15px] font-bold text-white transition hover:bg-[#1a8cd8] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy === "preferences"}
-              onClick={() => void savePreferences()}
-              type="button"
-            >
-              {busy === "preferences" ? <LoaderCircle className="h-[18px] w-[18px] animate-spin" /> : null}
-              Save preferences
+          <label style={{ display: "grid", gap: 8 }}>
+            <span className="m3-title-medium" style={{ fontSize: 14 }}>
+              Ссылка на аватар
+            </span>
+            <input
+              autoComplete="off"
+              className="m3-input"
+              name="avatar_url"
+              onChange={(event) => setProfileForm((current) => ({ ...current, avatar_url: event.target.value }))}
+              placeholder="https://example.com/avatar.jpg"
+              type="url"
+              value={profileForm.avatar_url}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 8 }}>
+            <span className="m3-title-medium" style={{ fontSize: 14 }}>
+              Описание
+            </span>
+            <textarea
+              className="m3-textarea"
+              maxLength={160}
+              name="bio"
+              onChange={(event) => setProfileForm((current) => ({ ...current, bio: event.target.value }))}
+              placeholder="Расскажите, что вы записываете и почему на вас стоит подписаться…"
+              value={profileForm.bio}
+            />
+            <span className="m3-body-small settings-field-meta">{profileForm.bio.length}/160</span>
+          </label>
+
+          <div className="settings-action-row">
+            <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={busy === "profile" || !isProfileDirty} onClick={() => void saveProfile()} type="button">
+              {busy === "profile" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : null}
+              {busy === "profile" ? "Сохранение\u2026" : isProfileDirty ? "Сохранить профиль" : "Профиль сохранён"}
             </button>
           </div>
-        </section>
+        </SectionCard>
 
-        <section className="rounded-[24px] border border-x-border bg-[#111214] p-5">
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5 text-x-blue" />
-            <h2 className="text-[22px] font-extrabold text-x-primary">Password</h2>
+        <SectionCard description="Управляйте видимостью профиля и уведомлениями." icon={ShieldCheck} title="Приватность">
+          <label className="m3-card settings-toggle-card">
+            <div className="settings-toggle-card__copy">
+              <p className="m3-title-medium">Показывать в поиске</p>
+              <p className="m3-body-small" style={{ marginTop: 4 }}>
+                Разрешить новым слушателям находить ваш профиль через поиск и рекомендации.
+              </p>
+            </div>
+            <input
+              checked={preferences.discoverable}
+              className="m3-switch"
+              onChange={(event) => setPreferences((current) => ({ ...current, discoverable: event.target.checked }))}
+              type="checkbox"
+            />
+          </label>
+
+          <label className="m3-card settings-toggle-card">
+            <div className="settings-toggle-card__copy">
+              <p className="m3-title-medium">Уведомления в приложении</p>
+              <p className="m3-body-small" style={{ marginTop: 4 }}>
+                Показывать ответы, подписки и обновления транскрипции в списке уведомлений.
+              </p>
+            </div>
+            <input
+              checked={preferences.notifications_enabled}
+              className="m3-switch"
+              onChange={(event) => setPreferences((current) => ({ ...current, notifications_enabled: event.target.checked }))}
+              type="checkbox"
+            />
+          </label>
+
+          <div className="settings-action-row">
+            <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={busy === "preferences" || !isPreferencesDirty} onClick={() => void savePreferences()} type="button">
+              {busy === "preferences" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : null}
+              {isPreferencesDirty ? "Сохранить настройки" : "Настройки сохранены"}
+            </button>
           </div>
-          <form className="mt-4 space-y-4" onSubmit={changePassword}>
-            <label className="block">
-              <span className="mb-2 block text-[14px] font-semibold text-x-primary">Current password</span>
-              <input
-                className="x-input rounded-[20px]"
-                onChange={(event) => setPasswordForm((current) => ({ ...current, current_password: event.target.value }))}
-                required
-                type="password"
-                value={passwordForm.current_password}
-              />
+        </SectionCard>
+
+        <SectionCard description="Смените пароль, не выходя из текущей сессии." icon={KeyRound} title="Пароль">
+          <form onSubmit={changePassword} style={{ display: "grid", gap: 14 }}>
+            <input aria-hidden="true" autoComplete="username" className="sr-only" readOnly tabIndex={-1} type="text" value={user?.email || user?.username || ""} />
+            <label style={{ display: "grid", gap: 8 }}>
+              <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                Текущий пароль
+              </span>
+              <div className="password-field">
+                <input
+                  autoComplete="current-password"
+                  className="m3-input password-field__input"
+                  name="current_password"
+                  onChange={(event) => setPasswordForm((current) => ({ ...current, current_password: event.target.value }))}
+                  required
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={passwordForm.current_password}
+                />
+                <button
+                  aria-label={showCurrentPassword ? "Скрыть текущий пароль" : "Показать текущий пароль"}
+                  aria-pressed={showCurrentPassword}
+                  className="password-field__toggle m3-interactive m3-state-neutral"
+                  onClick={() => setShowCurrentPassword((current) => !current)}
+                  type="button"
+                >
+                  {showCurrentPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </label>
-            <label className="block">
-              <span className="mb-2 block text-[14px] font-semibold text-x-primary">New password</span>
-              <input
-                className="x-input rounded-[20px]"
-                minLength={8}
-                onChange={(event) => setPasswordForm((current) => ({ ...current, new_password: event.target.value }))}
-                required
-                type="password"
-                value={passwordForm.new_password}
-              />
+            <label style={{ display: "grid", gap: 8 }}>
+              <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                Новый пароль
+              </span>
+              <div className="password-field">
+                <input
+                  autoComplete="new-password"
+                  className="m3-input password-field__input"
+                  minLength={8}
+                  name="new_password"
+                  onChange={(event) => setPasswordForm((current) => ({ ...current, new_password: event.target.value }))}
+                  required
+                  type={showNewPassword ? "text" : "password"}
+                  value={passwordForm.new_password}
+                />
+                <button
+                  aria-label={showNewPassword ? "Скрыть новый пароль" : "Показать новый пароль"}
+                  aria-pressed={showNewPassword}
+                  className="password-field__toggle m3-interactive m3-state-neutral"
+                  onClick={() => setShowNewPassword((current) => !current)}
+                  type="button"
+                >
+                  {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </label>
-            <div className="flex justify-end">
-              <button
-                className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-[15px] font-bold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={busy === "password"}
-                type="submit"
-              >
-                {busy === "password" ? <LoaderCircle className="h-[18px] w-[18px] animate-spin" /> : null}
-                Update password
+            <div className="settings-action-row">
+              <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={busy === "password"} type="submit">
+                {busy === "password" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : null}
+                Обновить пароль
               </button>
             </div>
           </form>
-        </section>
+        </SectionCard>
 
-        <section className="rounded-[24px] border border-x-border bg-[#111214] p-5">
-          <div className="flex items-center gap-2">
-            <Smartphone className="h-5 w-5 text-x-blue" />
-            <h2 className="text-[22px] font-extrabold text-x-primary">Sessions</h2>
-          </div>
-          <p className="mt-2 text-[14px] leading-6 text-x-secondary">Review every signed-in device and revoke anything you no longer trust.</p>
-
-          <div className="mt-4 space-y-3">
-            {sessions.length ? (
-              sessions.map((session) => (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-[20px] border border-white/10 bg-black/30 px-4 py-4" key={session.id}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-[15px] font-bold text-x-primary">{session.user_agent || "Unknown device"}</p>
-                      {session.current ? <span className="x-pill">Current</span> : null}
-                    </div>
-                    <p className="mt-1 text-[13px] text-x-secondary">Created {formatSessionDate(session.created_at)} • Last seen {formatSessionDate(session.last_seen_at)}</p>
-                    {session.ip_address ? <p className="mt-1 text-[13px] text-x-secondary">IP {session.ip_address}</p> : null}
+        <SectionCard description="Проверьте все активные устройства и завершите лишние сессии." icon={Smartphone} title="Сессии">
+          {sessions.length ? (
+            sessions.map((session) => (
+              <div className="m3-card settings-session-card" key={session.id}>
+                <div className="settings-session-card__copy">
+                  <div className="settings-session-card__header">
+                    <p className="m3-title-medium m3-break-anywhere">{session.user_agent || "Неизвестное устройство"}</p>
+                    {session.current ? <span className="m3-chip m3-chip-filled">Текущая</span> : null}
                   </div>
-                  {!session.current ? (
-                    <button
-                      className="rounded-full border border-white/10 px-4 py-2 text-[14px] font-bold text-x-primary transition hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={busy === `session:${session.id}`}
-                      onClick={() => void revokeSession(session.id)}
-                      type="button"
-                    >
-                      {busy === `session:${session.id}` ? "Revoking..." : "Revoke"}
-                    </button>
+                  <p className="m3-body-small" style={{ marginTop: 4 }}>
+                    Создана {formatSessionDate(session.created_at)} {"\u00b7"} Последняя активность {formatSessionDate(session.last_seen_at)}
+                  </p>
+                  {session.ip_address ? (
+                    <p className="m3-body-small" style={{ marginTop: 4 }}>
+                      IP {session.ip_address}
+                    </p>
                   ) : null}
                 </div>
-              ))
-            ) : (
-              <p className="rounded-[20px] border border-white/10 bg-black/30 px-4 py-4 text-[14px] text-x-secondary">No active sessions found.</p>
-            )}
-          </div>
 
-          <div className="mt-4 flex justify-end">
-            <button
-              className="inline-flex items-center gap-2 rounded-full border border-x-red/35 bg-x-red/10 px-5 py-2.5 text-[15px] font-bold text-red-100 transition hover:bg-x-red/20 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={busy === "logout-all"}
-              onClick={() => void logoutAll()}
-              type="button"
-            >
-              {busy === "logout-all" ? <LoaderCircle className="h-[18px] w-[18px] animate-spin" /> : <LogOut className="h-[18px] w-[18px]" />}
-              Log out all devices
+                {!session.current ? (
+                  <button className="m3-button m3-button-outlined m3-interactive" disabled={busy === `session:${session.id}`} onClick={() => setConfirmRequest({ type: "session", session })} type="button">
+                    {busy === `session:${session.id}` ? "Завершение\u2026" : "Завершить"}
+                  </button>
+                ) : null}
+              </div>
+            ))
+          ) : (
+            <div className="m3-card settings-empty-card">
+              <p className="m3-title-medium">Дополнительных сессий нет</p>
+              <p className="m3-body-small" style={{ marginTop: 4 }}>
+                Когда вы войдёте на других устройствах, они появятся здесь, и вы сможете быстро завершить их сессии.
+              </p>
+            </div>
+          )}
+
+          <div className="settings-action-row">
+            <button className="m3-button m3-button-outlined m3-interactive m3-state-tertiary" disabled={busy === "logout-all"} onClick={() => setConfirmRequest({ type: "logout-all" })} type="button">
+              {busy === "logout-all" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : <LogOut size={16} />}
+              Выйти на всех устройствах
             </button>
           </div>
-        </section>
-
-        <section className="rounded-[24px] border border-x-border bg-[#111214] p-5">
-          <div className="flex items-center gap-2">
-            <UserRoundCog className="h-5 w-5 text-x-blue" />
-            <h2 className="text-[22px] font-extrabold text-x-primary">Account snapshot</h2>
-          </div>
-          <div className="mt-4 grid gap-3 phone:grid-cols-2">
-            <div className="rounded-[20px] border border-white/10 bg-black/30 px-4 py-4">
-              <p className="text-[13px] font-semibold uppercase tracking-[0.2em] text-x-secondary">Username</p>
-              <p className="mt-2 text-[18px] font-bold text-x-primary">{user?.username}</p>
-            </div>
-            <div className="rounded-[20px] border border-white/10 bg-black/30 px-4 py-4">
-              <p className="text-[13px] font-semibold uppercase tracking-[0.2em] text-x-secondary">Role</p>
-              <p className="mt-2 text-[18px] font-bold capitalize text-x-primary">{user?.role}</p>
-            </div>
-          </div>
-        </section>
+        </SectionCard>
       </div>
+      <ConfirmDialog
+        busy={busy === "logout-all" || (confirmRequest?.type === "session" && busy === `session:${confirmRequest.session.id}`)}
+        confirmLabel={confirmRequest?.type === "logout-all" ? "Выйти везде" : "Завершить"}
+        description={
+          confirmRequest?.type === "logout-all"
+            ? "На остальных устройствах потребуется повторный вход."
+            : "На выбранном устройстве понадобится повторный вход."
+        }
+        onCancel={() => setConfirmRequest(null)}
+        onConfirm={() => {
+          if (confirmRequest?.type === "logout-all") {
+            void logoutAll();
+            return;
+          }
+          if (confirmRequest?.type === "session") {
+            void revokeSession(confirmRequest.session.id);
+          }
+        }}
+        open={Boolean(confirmRequest)}
+        title={confirmRequest?.type === "logout-all" ? "Выйти на всех устройствах?" : "Завершить эту сессию?"}
+      />
     </section>
   );
 }

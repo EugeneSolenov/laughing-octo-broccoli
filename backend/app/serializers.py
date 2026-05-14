@@ -72,15 +72,18 @@ def serialize_tweet(tweet: VoiceTweet, *, context: TweetRenderContext | None = N
     return VoiceTweetRead(
         id=tweet.id,
         audio_url=storage.resolve_public_url(tweet.audio_url),
+        duration_seconds=tweet.duration_seconds,
         caption=tweet.caption,
         transcription_text=tweet.transcription_text,
         status=tweet.status,
         mime_type=tweet.mime_type,
         error_message=tweet.error_message,
         likes_count=context.like_counts.get(tweet.id, 0),
+        dislikes_count=context.repost_counts.get(tweet.id, 0),
         reposts_count=context.repost_counts.get(tweet.id, 0),
         reply_count=context.reply_counts.get(tweet.id, 0),
         liked_by_viewer=tweet.id in context.liked_tweet_ids,
+        disliked_by_viewer=tweet.id in context.reposted_tweet_ids,
         reposted_by_viewer=tweet.id in context.reposted_tweet_ids,
         created_at=tweet.created_at,
         parent_tweet_id=tweet.parent_tweet_id,
@@ -138,19 +141,19 @@ def serialize_public_profile(
 
 
 def _notification_message(notification: Notification) -> str:
-    actor_name = notification.actor.username if notification.actor else "Someone"
+    actor_name = notification.actor.username if notification.actor else "Кто-то"
 
     if notification.type == NotificationType.follow:
-        return f"{actor_name} followed you."
+        return f"{actor_name} подписался(ась) на вас."
     if notification.type == NotificationType.like:
-        return f"{actor_name} liked your voice post."
+        return f"{actor_name} оценил(а) вашу запись."
     if notification.type == NotificationType.repost:
-        return f"{actor_name} reposted your voice post."
+        return f"{actor_name} поделился(ась) вашей записью."
     if notification.type == NotificationType.reply:
-        return f"{actor_name} replied to your voice post."
+        return f"{actor_name} ответил(а) на вашу запись."
     if notification.type == NotificationType.transcription_ready:
-        return "Your voice post finished transcription."
-    return "You have a new notification."
+        return "Транскрипция вашей записи готова."
+    return "У вас новое уведомление."
 
 
 def _notification_path(notification: Notification) -> str | None:
@@ -161,6 +164,15 @@ def _notification_path(notification: Notification) -> str | None:
     return None
 
 
+def _truncate_notification_preview(value: str, limit: int = 140) -> str:
+    compact = " ".join(value.strip().split())
+    if len(compact) <= limit:
+        return compact
+
+    trimmed = compact[: limit + 1].rsplit(" ", 1)[0] or compact[:limit]
+    return f"{trimmed.rstrip('.,;:!?- ')}..."
+
+
 def _notification_preview(notification: Notification) -> str | None:
     if notification.tweet is None:
         return None
@@ -168,7 +180,7 @@ def _notification_preview(notification: Notification) -> str | None:
     preview_source = notification.tweet.caption or notification.tweet.transcription_text or notification.tweet.error_message
     if not preview_source:
         return None
-    return preview_source.strip().splitlines()[0][:180]
+    return _truncate_notification_preview(preview_source)
 
 
 def serialize_notification(notification: Notification) -> NotificationRead:

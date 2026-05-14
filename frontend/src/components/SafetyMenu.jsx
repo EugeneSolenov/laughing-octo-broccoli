@@ -1,27 +1,99 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Ban, Flag, LoaderCircle, MoreHorizontal, VolumeX, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { ApiError, apiFetch } from "../api/client";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
+import ConfirmDialog from "./ConfirmDialog.jsx";
 
-const REPORT_REASONS = ["Harassment", "Spam", "Impersonation", "Explicit content", "Other"];
+const REPORT_REASONS = ["Оскорбления", "Спам", "Выдача себя за другого", "Нежелательный контент", "Другое"];
+const MENU_WIDTH = 260;
+const MENU_VIEWPORT_GAP = 16;
+const MENU_TRIGGER_GAP = 8;
 
-export default function SafetyMenu({
-  onActionComplete,
-  targetUserId,
-  targetUsername,
-  tweetId = null,
-}) {
+export default function SafetyMenu({ onActionComplete, targetUserId, targetUsername, tweetId = null }) {
   const { user } = useAuth();
   const showToast = useToast();
+  const menuRef = useRef(null);
+  const triggerRef = useRef(null);
   const [busyAction, setBusyAction] = useState("");
+  const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState(null);
   const [isReportOpen, setIsReportOpen] = useState(false);
   const [reportDetails, setReportDetails] = useState("");
   const [reportError, setReportError] = useState("");
   const [reportReason, setReportReason] = useState(REPORT_REASONS[0]);
+  const canBlockUsers = String(user?.role || "").toLowerCase() === "admin";
+
+  const updateMenuPosition = () => {
+    if (typeof window === "undefined" || !triggerRef.current) {
+      return;
+    }
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    const width = Math.min(MENU_WIDTH, Math.max(180, window.innerWidth - MENU_VIEWPORT_GAP * 2));
+    const opensToRight = rect.left + width <= window.innerWidth - MENU_VIEWPORT_GAP;
+    const left = opensToRight
+      ? rect.left
+      : Math.max(MENU_VIEWPORT_GAP, Math.min(rect.right - width, window.innerWidth - width - MENU_VIEWPORT_GAP));
+    const estimatedHeight = canBlockUsers ? 172 : 124;
+    const bottomTop = rect.bottom + MENU_TRIGGER_GAP;
+    const top = bottomTop + estimatedHeight <= window.innerHeight - MENU_VIEWPORT_GAP
+      ? bottomTop
+      : Math.max(MENU_VIEWPORT_GAP, rect.top - estimatedHeight - MENU_TRIGGER_GAP);
+
+    setMenuPosition({ left, top, width });
+  };
+
+  const openMenu = () => {
+    updateMenuPosition();
+    setIsMenuOpen(true);
+  };
+
+  const toggleMenu = () => {
+    if (isMenuOpen) {
+      setIsMenuOpen(false);
+      return;
+    }
+
+    openMenu();
+  };
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return undefined;
+    }
+
+    updateMenuPosition();
+
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) {
+        return;
+      }
+      setIsMenuOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMenuOpen, canBlockUsers]);
 
   if (!user || user.id === targetUserId) {
     return null;
@@ -35,17 +107,19 @@ export default function SafetyMenu({
   };
 
   const runRelationAction = async (action) => {
+    if (action === "block" && !canBlockUsers) {
+      return;
+    }
+
     try {
       setBusyAction(action);
       await apiFetch(`/users/${targetUserId}/${action}`, { method: "POST" });
+      setIsBlockConfirmOpen(false);
       setIsMenuOpen(false);
-      showToast(
-        action === "block" ? `Blocked ${targetUsername}.` : `Muted ${targetUsername}.`,
-        "success",
-      );
+      showToast(action === "block" ? `${targetUsername} заблокирован.` : `${targetUsername} скрыт из ленты.`, "success");
       onActionComplete?.(action);
     } catch (caughtError) {
-      showToast(caughtError instanceof ApiError ? caughtError.message : "Unable to complete the action.", "info");
+      showToast(caughtError instanceof ApiError ? caughtError.message : "Не удалось выполнить действие.", "info");
     } finally {
       setBusyAction("");
     }
@@ -69,10 +143,10 @@ export default function SafetyMenu({
       });
       closeReport();
       setIsMenuOpen(false);
-      showToast("Report submitted to moderation.", "success");
+      showToast("Жалоба отправлена модерации.", "success");
       onActionComplete?.("report");
     } catch (caughtError) {
-      setReportError(caughtError instanceof ApiError ? caughtError.message : "Unable to submit the report.");
+      setReportError(caughtError instanceof ApiError ? caughtError.message : "Не удалось отправить жалобу.");
     } finally {
       setBusyAction("");
     }
@@ -80,96 +154,134 @@ export default function SafetyMenu({
 
   return (
     <>
-      <div className="relative">
+      <div style={{ position: "relative" }}>
         <button
+          ref={triggerRef}
           aria-expanded={isMenuOpen}
           aria-haspopup="menu"
-          aria-label={`Open safety actions for ${targetUsername}`}
-          className="x-icon-button h-9 w-9"
-          onClick={() => setIsMenuOpen((current) => !current)}
+          aria-label={`Открыть действия для ${targetUsername}`}
+          className="m3-icon-button m3-interactive safety-menu__trigger"
+          onClick={toggleMenu}
           type="button"
         >
-          <MoreHorizontal className="h-[18px] w-[18px]" />
+          <MoreHorizontal size={16} />
         </button>
 
-        <AnimatePresence>
-          {isMenuOpen ? (
-            <motion.div
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="absolute right-0 top-11 z-20 w-[220px] rounded-[20px] border border-white/10 bg-[#0f1115] p-2 shadow-lift"
-              exit={{ opacity: 0, scale: 0.98, y: -8 }}
-              initial={{ opacity: 0, scale: 0.98, y: -8 }}
-            >
-              <button
-                className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-[14px] text-x-primary transition hover:bg-white/[0.04]"
-                disabled={Boolean(busyAction)}
-                onClick={() => {
-                  setIsReportOpen(true);
-                  setIsMenuOpen(false);
-                }}
-                type="button"
-              >
-                <Flag className="h-4 w-4 text-x-blue" />
-                Report
-              </button>
-              <button
-                className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-[14px] text-x-primary transition hover:bg-white/[0.04] disabled:opacity-60"
-                disabled={Boolean(busyAction)}
-                onClick={() => void runRelationAction("mute")}
-                type="button"
-              >
-                {busyAction === "mute" ? <LoaderCircle className="h-4 w-4 animate-spin text-x-blue" /> : <VolumeX className="h-4 w-4 text-x-blue" />}
-                Mute {targetUsername}
-              </button>
-              <button
-                className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-[14px] text-red-100 transition hover:bg-x-red/10 disabled:opacity-60"
-                disabled={Boolean(busyAction)}
-                onClick={() => void runRelationAction("block")}
-                type="button"
-              >
-                {busyAction === "block" ? <LoaderCircle className="h-4 w-4 animate-spin text-red-100" /> : <Ban className="h-4 w-4" />}
-                Block {targetUsername}
-              </button>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+        {typeof document !== "undefined"
+          ? createPortal(
+              <AnimatePresence>
+                {isMenuOpen && menuPosition ? (
+                  <motion.div
+                    ref={menuRef}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    className="m3-card safety-menu__panel"
+                    exit={{ opacity: 0, scale: 0.98, y: -6 }}
+                    initial={{ opacity: 0, scale: 0.98, y: -6 }}
+                    role="menu"
+                    style={{
+                      left: menuPosition.left,
+                      padding: 8,
+                      position: "fixed",
+                      top: menuPosition.top,
+                      width: menuPosition.width,
+                      zIndex: "calc(var(--z-dialog) + 40)",
+                    }}
+                  >
+                    <button
+                      className="m3-interactive safety-menu__item"
+                      disabled={Boolean(busyAction)}
+                      onClick={() => {
+                        setIsReportOpen(true);
+                        setIsMenuOpen(false);
+                      }}
+                      role="menuitem"
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "transparent", border: 0, textAlign: "left" }}
+                      type="button"
+                    >
+                      <Flag size={16} style={{ color: "var(--md-sys-color-primary)" }} />
+                      <span className="safety-menu__item-label">Пожаловаться</span>
+                    </button>
+                    <button
+                      className="m3-interactive safety-menu__item"
+                      disabled={Boolean(busyAction)}
+                      onClick={() => void runRelationAction("mute")}
+                      role="menuitem"
+                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "transparent", border: 0, textAlign: "left" }}
+                      type="button"
+                    >
+                      {busyAction === "mute" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite", color: "var(--md-sys-color-primary)" }} /> : <VolumeX size={16} style={{ color: "var(--md-sys-color-primary)" }} />}
+                      <span className="safety-menu__item-label">Скрыть {targetUsername}</span>
+                    </button>
+                    {canBlockUsers ? (
+                      <button
+                        className="m3-interactive safety-menu__item safety-menu__item--danger"
+                        disabled={Boolean(busyAction)}
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          setIsBlockConfirmOpen(true);
+                        }}
+                        role="menuitem"
+                        style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderRadius: 14, background: "transparent", border: 0, textAlign: "left", color: "var(--md-sys-color-tertiary)" }}
+                        type="button"
+                      >
+                        {busyAction === "block" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Ban size={16} />}
+                        <span className="safety-menu__item-label">Заблокировать {targetUsername}</span>
+                      </button>
+                    ) : null}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>,
+              document.body,
+            )
+          : null}
       </div>
 
       <AnimatePresence>
         {isReportOpen ? (
           <motion.div
             animate={{ opacity: 1 }}
-            className="fixed inset-0 z-50 bg-black/75 px-4 py-6 backdrop-blur-sm"
+            className="m3-overlay"
             exit={{ opacity: 0 }}
             initial={{ opacity: 0 }}
             onClick={closeReport}
           >
             <motion.section
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="mx-auto max-w-[540px] rounded-[24px] border border-white/10 bg-[#090b0f]"
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+              aria-label={`Пожаловаться на ${targetUsername}`}
+              aria-modal="true"
+              className="m3-dialog"
               exit={{ opacity: 0, scale: 0.98, y: 12 }}
               initial={{ opacity: 0, scale: 0.98, y: 12 }}
               onClick={(event) => event.stopPropagation()}
+              role="dialog"
             >
-              <header className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+              <div className="dialog-header">
                 <div>
-                  <p className="text-[20px] font-extrabold text-x-primary">Report {targetUsername}</p>
-                  <p className="text-[13px] text-x-secondary">Flag unsafe content or behavior for moderation review.</p>
+                  <p className="m3-section-label">Безопасность</p>
+                  <h2 className="m3-title-medium" style={{ marginTop: 4, fontSize: 20 }}>
+                    Пожаловаться на {targetUsername}
+                  </h2>
+                  <p className="m3-body-small" style={{ marginTop: 6 }}>
+                    Сообщите о нежелательном поведении или контенте для проверки модераторами.
+                  </p>
                 </div>
-                <button aria-label="Close report dialog" className="x-icon-button h-10 w-10" onClick={closeReport} type="button">
-                  <X className="h-5 w-5" />
+                <button aria-label="Закрыть окно жалобы" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={closeReport} type="button">
+                  <X size={16} />
                 </button>
-              </header>
+              </div>
 
-              <form className="space-y-4 p-5" onSubmit={submitReport}>
+              <form className="dialog-body" onSubmit={submitReport} style={{ display: "grid", gap: 16 }}>
                 <div>
-                  <p className="text-[14px] font-semibold text-x-primary">Reason</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <p className="m3-title-medium" style={{ fontSize: 14 }}>
+                    Причина
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
                     {REPORT_REASONS.map((reason) => (
                       <button
                         className={[
-                          "rounded-full px-4 py-2 text-[14px] font-semibold transition",
-                          reportReason === reason ? "bg-x-blue text-white" : "bg-white/[0.04] text-x-secondary hover:bg-white/[0.08] hover:text-x-primary",
+                          "m3-chip",
+                          "m3-interactive",
+                          reportReason === reason ? "m3-chip-filled" : "",
                         ].join(" ")}
                         key={reason}
                         onClick={() => setReportReason(reason)}
@@ -181,37 +293,29 @@ export default function SafetyMenu({
                   </div>
                 </div>
 
-                <label className="block">
-                  <span className="mb-2 flex items-center gap-2 text-[14px] font-semibold text-x-primary">
-                    <AlertTriangle className="h-4 w-4 text-x-blue" />
-                    Extra context
+                <label style={{ display: "grid", gap: 8 }}>
+                  <span className="m3-title-medium" style={{ fontSize: 14 }}>
+                    <AlertTriangle size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "-2px", color: "var(--md-sys-color-primary)" }} />
+                    Подробности
                   </span>
                   <textarea
-                    className="x-input min-h-[132px] rounded-[20px]"
+                    className="m3-textarea"
                     maxLength={2000}
                     onChange={(event) => setReportDetails(event.target.value)}
-                    placeholder="Add any details that will help the moderation queue triage this faster."
+                    placeholder="Добавьте детали, которые помогут быстрее проверить жалобу."
                     value={reportDetails}
                   />
                 </label>
 
-                {reportError ? <p className="rounded-2xl border border-x-red/35 bg-x-red/10 px-4 py-3 text-[14px] text-red-100">{reportError}</p> : null}
+                {reportError ? <p className="m3-error">{reportError}</p> : null}
 
-                <div className="flex items-center justify-end gap-3">
-                  <button
-                    className="rounded-full px-4 py-2.5 text-[15px] font-bold text-x-primary transition hover:bg-x-hover"
-                    onClick={closeReport}
-                    type="button"
-                  >
-                    Cancel
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, flexWrap: "wrap" }}>
+                  <button className="m3-button m3-button-outlined m3-interactive" onClick={closeReport} type="button">
+                    Отмена
                   </button>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-full bg-x-blue px-5 py-2.5 text-[15px] font-bold text-white transition hover:bg-[#1a8cd8] disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={busyAction === "report"}
-                    type="submit"
-                  >
-                    {busyAction === "report" ? <LoaderCircle className="h-[18px] w-[18px] animate-spin" /> : <Flag className="h-[18px] w-[18px]" />}
-                    {busyAction === "report" ? "Submitting..." : "Send report"}
+                  <button className="m3-button m3-button-filled m3-fab m3-interactive" disabled={busyAction === "report"} type="submit">
+                    {busyAction === "report" ? <LoaderCircle size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Flag size={16} />}
+                    {busyAction === "report" ? "Отправка\u2026" : "Отправить жалобу"}
                   </button>
                 </div>
               </form>
@@ -219,6 +323,20 @@ export default function SafetyMenu({
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      {canBlockUsers ? (
+        <ConfirmDialog
+          busy={busyAction === "block"}
+          confirmLabel="Заблокировать"
+          description={`Записи и профиль ${targetUsername} будут скрыты из вашей ленты.`}
+          onCancel={() => setIsBlockConfirmOpen(false)}
+          onConfirm={() => void runRelationAction("block")}
+          open={isBlockConfirmOpen}
+          title={`Заблокировать ${targetUsername}?`}
+        />
+      ) : null}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </>
   );
 }

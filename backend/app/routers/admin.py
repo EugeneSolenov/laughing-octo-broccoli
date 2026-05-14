@@ -18,18 +18,24 @@ from app.transcription import get_queue_depth
 
 router = APIRouter()
 
+DEFAULT_USERS_LIMIT = 50
+DEFAULT_USERS_OFFSET = 0
+DEFAULT_TWEETS_LIMIT = 100
+DEFAULT_TWEETS_OFFSET = 0
+DEFAULT_REPORTS_LIMIT = 50
+DEFAULT_REPORTS_OFFSET = 0
 
-@router.get("/admin/dashboard", response_model=AdminDashboardResponse)
-def get_admin_dashboard(
-    _: AdminUser,
-    users_limit: int = Query(default=50, ge=1, le=200),
-    users_offset: int = Query(default=0, ge=0),
-    tweets_limit: int = Query(default=100, ge=1, le=200),
-    tweets_offset: int = Query(default=0, ge=0),
-    reports_limit: int = Query(default=50, ge=1, le=200),
-    reports_offset: int = Query(default=0, ge=0),
-    user_q: str | None = Query(default=None, min_length=1, max_length=120),
-    db: Session = Depends(get_db),
+
+def _build_admin_dashboard(
+    *,
+    db: Session,
+    users_limit: int = DEFAULT_USERS_LIMIT,
+    users_offset: int = DEFAULT_USERS_OFFSET,
+    tweets_limit: int = DEFAULT_TWEETS_LIMIT,
+    tweets_offset: int = DEFAULT_TWEETS_OFFSET,
+    reports_limit: int = DEFAULT_REPORTS_LIMIT,
+    reports_offset: int = DEFAULT_REPORTS_OFFSET,
+    user_q: str | None = None,
 ) -> AdminDashboardResponse:
     total_users = db.scalar(select(func.count()).select_from(User)) or 0
     total_tweets = db.scalar(select(func.count()).select_from(VoiceTweet)) or 0
@@ -98,6 +104,30 @@ def get_admin_dashboard(
     )
 
 
+@router.get("/admin/dashboard", response_model=AdminDashboardResponse)
+def get_admin_dashboard(
+    _: AdminUser,
+    users_limit: int = Query(default=DEFAULT_USERS_LIMIT, ge=1, le=200),
+    users_offset: int = Query(default=DEFAULT_USERS_OFFSET, ge=0),
+    tweets_limit: int = Query(default=DEFAULT_TWEETS_LIMIT, ge=1, le=200),
+    tweets_offset: int = Query(default=DEFAULT_TWEETS_OFFSET, ge=0),
+    reports_limit: int = Query(default=DEFAULT_REPORTS_LIMIT, ge=1, le=200),
+    reports_offset: int = Query(default=DEFAULT_REPORTS_OFFSET, ge=0),
+    user_q: str | None = Query(default=None, min_length=1, max_length=120),
+    db: Session = Depends(get_db),
+) -> AdminDashboardResponse:
+    return _build_admin_dashboard(
+        db=db,
+        users_limit=users_limit,
+        users_offset=users_offset,
+        tweets_limit=tweets_limit,
+        tweets_offset=tweets_offset,
+        reports_limit=reports_limit,
+        reports_offset=reports_offset,
+        user_q=user_q,
+    )
+
+
 @router.patch("/admin/reports/{report_id}", response_model=AdminDashboardResponse, include_in_schema=False)
 def update_report_status(
     report_id: int,
@@ -111,4 +141,4 @@ def update_report_status(
     report.status = payload.status
     db.add(report)
     db.commit()
-    return get_admin_dashboard(admin_user, db=db)
+    return _build_admin_dashboard(db=db)

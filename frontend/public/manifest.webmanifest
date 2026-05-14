@@ -1,14 +1,14 @@
 {
-  "name": "Voice X",
-  "short_name": "Voice X",
+  "name": "Flutter",
+  "short_name": "Flutter",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
-  "description": "Voice-first social feed with AI transcription.",
+  "description": "Голосовая социальная лента с AI-транскрипцией.",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "/bird_logo_square_no_eye.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"

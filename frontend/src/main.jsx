@@ -10,6 +10,28 @@ import "./index.css";
 
 initObservability();
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+async function unregisterServiceWorkers() {
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(
+    registrations.map((registration) => registration.unregister()),
+  );
+}
+
+async function clearAppCaches() {
+  if (!("caches" in window)) {
+    return;
+  }
+
+  const cacheKeys = await caches.keys();
+  await Promise.all(
+    cacheKeys
+      .filter((cacheKey) => cacheKey.startsWith("voice-atlas-"))
+      .map((cacheKey) => caches.delete(cacheKey)),
+  );
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter
@@ -29,8 +51,19 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      // Service worker registration is optional.
-    });
+    const shouldUseServiceWorker =
+      import.meta.env.PROD && !LOOPBACK_HOSTS.has(window.location.hostname);
+
+    if (shouldUseServiceWorker) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {
+        // Service worker registration is optional.
+      });
+      return;
+    }
+
+    Promise.all([unregisterServiceWorkers(), clearAppCaches()])
+      .catch(() => {
+        // Ignore local service worker cleanup failures.
+      });
   });
 }

@@ -1,160 +1,170 @@
-import { Bell, Compass, Feather, Home, LogIn, LogOut, Settings, Shield, User, UserPlus } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Bell, Compass, Home, LogIn, LogOut, Mic, Settings, Shield, User, UserPlus } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 
-function NavButton({ active, badgeCount = 0, icon: Icon, label, onClick }) {
-  return (
-    <button
+import BrandMark from "./BrandMark.jsx";
+
+function NavItem({ active, className = "", hasBadge = false, icon: Icon, label, onClick, to }) {
+  const content = (
+    <span
       className={[
-        "group flex w-full items-center justify-center rounded-full p-3 text-x-primary transition tablet:justify-start tablet:px-3 desktop:px-4",
-        active ? "font-bold text-white" : "text-x-primary hover:bg-x-hover",
-      ].join(" ")}
-      onClick={onClick}
-      type="button"
+        "m3-nav-item",
+        "m3-interactive",
+        className,
+        active ? "is-active" : "",
+      ].join(" ").trim()}
+      aria-current={active ? "page" : undefined}
     >
-      <span className={["relative flex h-12 w-12 items-center justify-center rounded-full transition", active ? "bg-x-hover" : "group-hover:bg-x-hover"].join(" ")}>
-        <Icon className="h-7 w-7" fill={active ? "currentColor" : "none"} strokeWidth={active ? 2.4 : 2} />
-        {badgeCount ? (
-          <span className="absolute right-1 top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-x-blue px-1.5 text-[11px] font-bold text-white">
-            {badgeCount > 9 ? "9+" : badgeCount}
-          </span>
-        ) : null}
+      <span className="m3-nav-item__icon">
+        <Icon aria-hidden="true" size={20} strokeWidth={active ? 2.2 : 1.8} />
+        {hasBadge ? <span className="m3-nav-item__badge" /> : null}
       </span>
-      <span className="ml-4 hidden text-[20px] leading-6 desktop:block">{label}</span>
+      <span className="sidebar-nav-label">
+        {label}
+      </span>
+    </span>
+  );
+
+  if (to) {
+    return (
+      <Link aria-label={label} className="sidebar-nav-link" title={label} to={to}>
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <button aria-label={label} className="sidebar-nav-button" onClick={onClick} title={label} type="button">
+      {content}
     </button>
   );
 }
 
-export default function Sidebar({ onCompose, onLogout, onOpenNotifications, onOpenSearch, unreadCount = 0, user }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const pathname = location.pathname;
+function UserSummary({ onLogout, user }) {
+  if (!user) {
+    return (
+      <div className="sidebar-footer">
+        <div className="m3-panel sidebar-guest-card">
+          <div className="sidebar-guest-card__actions">
+            <Link aria-label="Создать аккаунт" className="m3-icon-button m3-icon-button--filled m3-interactive" title="Создать аккаунт" to="/register">
+              <UserPlus size={16} />
+            </Link>
+            <Link aria-label="Войти" className="m3-icon-button m3-icon-button--outlined m3-interactive" title="Войти" to="/login">
+              <LogIn size={16} />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sidebar-footer">
+      <div className="m3-panel sidebar-account-card">
+        <Link aria-label="Открыть профиль" className="m3-interactive sidebar-account-card__summary" title={user.username} to="/profile">
+          <div className="m3-avatar sidebar-account-card__avatar">
+            {user.username.slice(0, 2).toUpperCase()}
+          </div>
+          <div className="sidebar-footer-copy sidebar-account-card__copy">
+            <p className="m3-title-medium sidebar-account-card__name">
+              {user.username}
+            </p>
+            <p className="m3-body-small sidebar-account-card__handle">
+              @{user.username.toLowerCase()}
+            </p>
+          </div>
+        </Link>
+        <div className="sidebar-account-card__divider" />
+        <div className="sidebar-account-card__actions">
+          <Link aria-label="Настройки" className="m3-icon-button m3-icon-button--outlined m3-interactive" title="Настройки" to="/settings">
+            <Settings size={16} />
+          </Link>
+          <button aria-label="Выйти" className="m3-icon-button m3-icon-button--outlined m3-interactive" onClick={onLogout} title="Выйти" type="button">
+            <LogOut size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Sidebar({
+  isComposerActive = false,
+  isNotificationsActive = false,
+  isSearchActive = false,
+  onCompose,
+  onLogout,
+  onOpenNotifications,
+  onOpenSearch,
+  unreadCount = 0,
+  user,
+}) {
+  const { pathname } = useLocation();
 
   const items = [
+    { key: "feed", label: "Главная", icon: Home, active: pathname === "/", to: "/" },
     {
-      key: "home",
-      label: "Home",
-      icon: Home,
-      active: pathname === "/",
-      onClick: () => navigate("/"),
-      visible: true,
-    },
-    {
-      key: "explore",
-      label: "Explore",
+      key: "discover",
+      label: "Поиск",
       icon: Compass,
-      active: false,
-      onClick: onOpenSearch,
-      visible: true,
+      active: pathname === "/search" || isSearchActive,
+      to: "/search",
     },
-    {
-      key: "notifications",
-      label: "Notifications",
-      icon: Bell,
-      badgeCount: unreadCount,
-      active: false,
-      onClick: onOpenNotifications,
-      visible: true,
-    },
-    {
-      key: "profile",
-      label: "Profile",
-      icon: User,
-      active: pathname.startsWith("/profile"),
-      onClick: () => navigate(user ? "/profile" : "/login"),
-      visible: true,
-    },
-    {
-      key: "settings",
-      label: "Settings",
-      icon: Settings,
-      active: pathname === "/settings",
-      onClick: () => navigate(user ? "/settings" : "/login"),
-      visible: Boolean(user),
-    },
+    { key: "notifications", label: "Уведомления", icon: Bell, active: isNotificationsActive, hasBadge: unreadCount > 0, onClick: onOpenNotifications },
+    { key: "profile", label: "Профиль", icon: User, active: pathname.startsWith("/profile"), to: user ? "/profile" : "/login" },
     {
       key: "admin",
-      label: "Admin",
+      label: "Админ",
       icon: Shield,
       active: pathname === "/admin",
-      onClick: () => navigate("/admin"),
-      visible: String(user?.role || "").toLowerCase() === "admin",
+      to: "/admin",
+      hidden: String(user?.role || "").toLowerCase() !== "admin",
     },
   ];
 
   return (
-    <aside className="flex h-screen flex-col justify-between px-2 py-2 desktop:pr-3">
-      <div className="space-y-1">
-        <Link className="inline-flex h-14 w-14 items-center justify-center rounded-full text-x-primary transition hover:bg-x-hover" to="/">
-          <span className="text-[24px] font-extrabold tracking-tight">VA</span>
+    <aside aria-label="Основная боковая панель" className="sidebar-shell">
+      <div className="sidebar-shell__top">
+        <Link aria-label="На главную Flutter" className="sidebar-brand m3-interactive" title="На главную Flutter" to="/">
+          <BrandMark size={52} />
+          <div className="sidebar-brand-copy">
+            <p className="m3-section-label">Flutter</p>
+            <p className="m3-title-medium sidebar-brand-copy__title">
+              Аудио-социальная сеть
+            </p>
+          </div>
         </Link>
 
-        <nav className="mt-1 space-y-1">
-          {items.filter((item) => item.visible).map((item) => (
-            <NavButton active={item.active} badgeCount={item.badgeCount} icon={item.icon} key={item.key} label={item.label} onClick={item.onClick} />
-          ))}
+        <nav aria-label="Основная навигация" className="sidebar-nav">
+          {items
+            .filter((item) => !item.hidden)
+            .map((item) => (
+              <NavItem
+                active={item.active}
+                className={item.className}
+                hasBadge={item.hasBadge}
+                icon={item.icon}
+                key={item.key}
+                label={item.label}
+                onClick={item.onClick}
+                to={item.to}
+              />
+            ))}
         </nav>
 
-        <button
-          className="mt-4 flex h-14 w-14 items-center justify-center rounded-full bg-x-blue text-white transition hover:bg-[#1a8cd8] tablet:w-full desktop:hidden"
-          onClick={onCompose}
-          type="button"
-        >
-          <Feather className="h-6 w-6" />
-        </button>
-
-        <button
-          className="mt-4 hidden w-full items-center justify-center rounded-full bg-x-blue px-8 py-3.5 text-[17px] font-bold text-white transition hover:bg-[#1a8cd8] desktop:flex"
-          onClick={onCompose}
-          type="button"
-        >
-          Post
-        </button>
+        <div className="sidebar-compose-slot">
+          <button
+            aria-label="Записать пост"
+            className={["sidebar-compose-button", "m3-interactive", isComposerActive ? "is-active" : ""].join(" ")}
+            onClick={onCompose}
+            title="Записать пост"
+            type="button"
+          >
+            <Mic size={18} />
+          </button>
+        </div>
       </div>
 
-      <div className="pb-2">
-        {user ? (
-          <div className="rounded-[20px] border border-transparent p-2 transition hover:bg-x-hover">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#1d9bf0]/15 text-[15px] font-bold text-x-blue">
-                {user.username.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="hidden min-w-0 flex-1 desktop:block">
-                <p className="truncate text-[15px] font-bold text-x-primary">{user.username}</p>
-                <p className="truncate text-[15px] text-x-secondary">@{user.username.toLowerCase()}</p>
-              </div>
-              <button
-                className="x-icon-button hidden h-10 w-10 desktop:inline-flex"
-                onClick={onLogout}
-                title="Sign out"
-                type="button"
-              >
-                <LogOut className="h-[18px] w-[18px]" />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="rounded-[20px] border border-x-border bg-[#111214] p-4 desktop:p-5">
-            <p className="text-[17px] font-extrabold text-x-primary">Join Voice Atlas</p>
-            <p className="mt-1 text-[15px] leading-5 text-x-secondary">Sign in to post voice notes and unlock your profile.</p>
-            <div className="mt-4 space-y-2">
-              <Link
-                className="flex items-center justify-center gap-2 rounded-full bg-x-blue px-4 py-2.5 text-[15px] font-bold text-white transition hover:bg-[#1a8cd8]"
-                to="/register"
-              >
-                <UserPlus className="h-4 w-4" />
-                Register
-              </Link>
-              <Link
-                className="flex items-center justify-center gap-2 rounded-full border border-x-border px-4 py-2.5 text-[15px] font-bold text-x-primary transition hover:bg-x-hover"
-                to="/login"
-              >
-                <LogIn className="h-4 w-4" />
-                Login
-              </Link>
-            </div>
-          </div>
-        )}
-      </div>
+      <UserSummary onLogout={onLogout} user={user} />
     </aside>
   );
 }

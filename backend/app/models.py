@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, String, Table, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, String, Table, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -197,8 +197,9 @@ class VoiceTweet(Base):
         nullable=True,
         index=True,
     )
-    audio_url: Mapped[str] = mapped_column(String(512), nullable=False)
-    caption: Mapped[str | None] = mapped_column(String(280), nullable=True)
+    audio_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    caption: Mapped[str | None] = mapped_column(String(500), nullable=True)
     transcription_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     edited_transcription_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[TweetStatus] = mapped_column(
@@ -207,7 +208,7 @@ class VoiceTweet(Base):
         nullable=False,
         index=True,
     )
-    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

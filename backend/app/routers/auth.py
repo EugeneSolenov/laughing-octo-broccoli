@@ -116,10 +116,25 @@ def refresh_session(
 
 
 @router.get("/auth/session", response_model=AuthResponse)
-def get_session(current_user=Depends(get_optional_user)) -> AuthResponse:
-    if current_user is None:
+def get_session(
+    request: Request,
+    response: Response,
+    current_user=Depends(get_optional_user),
+    refresh_context=Depends(get_optional_refresh_context),
+    db: Session = Depends(get_db),
+) -> AuthResponse:
+    if current_user is not None:
+        return AuthResponse(user=serialize_user(current_user), detail="Session active.")
+    if refresh_context is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
-    return AuthResponse(user=serialize_user(current_user), detail="Session active.")
+
+    touch_auth_session(db, refresh_context.session)
+    if not refresh_context.session.user_agent and request.headers.get("user-agent"):
+        refresh_context.session.user_agent = request.headers.get("user-agent")
+    access_token, refresh_token = issue_auth_tokens(refresh_context.user, session_id=refresh_context.session.id)
+    db.commit()
+    set_auth_cookies(response, access_token, refresh_token)
+    return AuthResponse(user=serialize_user(refresh_context.user), detail="Session active.")
 
 
 @router.get("/auth/sessions", response_model=SessionListResponse)
@@ -130,7 +145,7 @@ def list_sessions(
 ) -> SessionListResponse:
     sessions = db.scalars(
         select(AuthSession)
-        .where(AuthSession.user_id == current_user.id)
+        .where(AuthSession.user_id == current_user.id, AuthSession.revoked_at.is_(None))
         .order_by(AuthSession.created_at.desc())
     ).all()
     current_id = current_context.session.id if current_context else None
@@ -167,6 +182,7 @@ def logout_all(response: Response, current_user: AuthenticatedUser, db: Session 
 @router.post("/auth/change-password", response_model=GenericDetailResponse)
 def change_password(
     payload: ChangePasswordRequest,
+    response: Response,
     current_user: AuthenticatedUser,
     db: Session = Depends(get_db),
 ) -> GenericDetailResponse:
@@ -178,7 +194,9 @@ def change_password(
 
     user.hashed_password = hash_password(payload.new_password)
     db.add(user)
+    revoke_all_auth_sessions(db, user_id=user.id)
     db.commit()
+    clear_auth_cookies(response)
     return GenericDetailResponse(detail="Password updated.")
 
 
